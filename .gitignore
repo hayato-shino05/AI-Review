@@ -1,0 +1,24 @@
+# Virtual environment (compiled binaries)
+venv/
+env/
+.env/
+
+# Bytecode and caches
+__pycache__/
+*.py[cod]
+*.class
+.pytest_cache/
+.coverage
+htmlcov/
+.cache/
+
+# Distribution and packaging
+build/
+dist/
+*.egg-info/
+*.egg
+
+# System files
+.DS_Store
+*.swp
+*.swo
