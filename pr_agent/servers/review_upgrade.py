@@ -62,7 +62,7 @@ INSTRUCTIONS_VI = """
   + P0 (Critical): `https://greptile-static-assets.s3.amazonaws.com/badges/p0.svg?v=9`
   + P1 (High): `https://greptile-static-assets.s3.amazonaws.com/badges/p1.svg?v=9`
   + P2 (Medium): `https://greptile-static-assets.s3.amazonaws.com/badges/p2.svg?v=9`
-  + P3 (Low): `https://img.shields.io/badge/P3-Low-informational?style=flat-square`
+  + P3 (Low): `https://camo.githubusercontent.com/8df84040dec6ed21e795add369b5db7d9be8580c4cfc47fb9b77c63f509e31f7/687474703a2f2f3231332e3136332e3230322e3134372f6261646765732f70332e737667`
   + Security: `https://greptile-static-assets.s3.amazonaws.com/badges/Security.svg?v=2`
 - Đóng gói khối XML Prompt cho AI Coding Subagents:
   ```text
@@ -121,7 +121,7 @@ INSTRUCTIONS_JA = """
   + P0: `https://greptile-static-assets.s3.amazonaws.com/badges/p0.svg?v=9`
   + P1: `https://greptile-static-assets.s3.amazonaws.com/badges/p1.svg?v=9`
   + P2: `https://greptile-static-assets.s3.amazonaws.com/badges/p2.svg?v=9`
-  + P3: `https://img.shields.io/badge/P3-Low-informational?style=flat-square`
+  + P3: `https://camo.githubusercontent.com/8df84040dec6ed21e795add369b5db7d9be8580c4cfc47fb9b77c63f509e31f7/687474703a2f2f3231332e3136332e3230322e3134372f6261646765732f70332e737667`
   + Security: `https://greptile-static-assets.s3.amazonaws.com/badges/Security.svg?v=2`
 - AIコーディングエージェント用のXML違反ブロックを提供してください：
   ```text
@@ -181,7 +181,7 @@ INSTRUCTIONS_EN = """
   + P0 (Critical): `https://greptile-static-assets.s3.amazonaws.com/badges/p0.svg?v=9`
   + P1 (High): `https://greptile-static-assets.s3.amazonaws.com/badges/p1.svg?v=9`
   + P2 (Medium): `https://greptile-static-assets.s3.amazonaws.com/badges/p2.svg?v=9`
-  + P3 (Low): `https://img.shields.io/badge/P3-Low-informational?style=flat-square`
+  + P3 (Low): `https://camo.githubusercontent.com/8df84040dec6ed21e795add369b5db7d9be8580c4cfc47fb9b77c63f509e31f7/687474703a2f2f3231332e3136332e3230322e3134372f6261646765732f70332e737667`
   + Security: `https://greptile-static-assets.s3.amazonaws.com/badges/Security.svg?v=2`
 - Provide structured XML prompt blocks for AI coding subagents:
   ```text
@@ -508,7 +508,7 @@ def format_and_publish_benchmark_review(data: dict, git_provider, main_language:
         "P0": "https://camo.githubusercontent.com/9e1053479d016a4a35e5337d42328403fc6ee79f5f416add2cbe946b4b532368/68747470733a2f2f6772657074696c652d7374617469632d6173736574732e73332e616d617a6f6e6177732e636f6d2f6261646765732f70302e7376673f763d39",
         "P1": "https://camo.githubusercontent.com/9b9055cf7996c10ba57796f877a6a7132a051e6be13a8103144a5829dd9a7599/68747470733a2f2f6772657074696c652d7374617469632d6173736574732e73332e616d617a6f6e6177732e636f6d2f6261646765732f70312e7376673f763d39",
         "P2": "https://camo.githubusercontent.com/65d4a57906e38192dd91dd6055ee2cd191caa5074db73473d0c1cc3183b2ea58/68747470733a2f2f6772657074696c652d7374617469632d6173736574732e73332e616d617a6f6e6177732e636f6d2f6261646765732f70322e7376673f763d39",
-        "P3": "https://img.shields.io/badge/P3-Low-informational?style=flat-square",
+        "P3": "https://camo.githubusercontent.com/8df84040dec6ed21e795add369b5db7d9be8580c4cfc47fb9b77c63f509e31f7/687474703a2f2f3231332e3136332e3230322e3134372f6261646765732f70332e737667",
         "Security": "https://camo.githubusercontent.com/65a7bbe5220687b7e3c2340a17370b99c80449bb6bcf8fca0e8a67bd1ce181f5/68747470733a2f2f6772657074696c652d7374617469632d6173736574732e73332e616d617a6f6e6177732e636f6d2f6261646765732f53656375726974792e7376673f763d32"
     }
 
