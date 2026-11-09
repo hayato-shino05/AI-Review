@@ -1,0 +1,13 @@
+[Unit]
+Description=Qodo PR-Agent Webhook Server
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/chroot /opt/devbox /bin/bash -c "cd /opt/AI-Review && source venv/bin/activate && export PORT=3000 && exec python3 -m pr_agent.servers.github_app"
+Restart=always
+RestartSec=5
+Environment=PORT=3000
+
+[Install]
+WantedBy=multi-user.target
