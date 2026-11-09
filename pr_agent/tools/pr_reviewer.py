@@ -1559,14 +1559,15 @@ class PRReviewer:
         is_p0 = any(w in header_l or w in content_l for w in ["p0", "data loss", "drop schema", "unrecoverable", "truncate"])
         is_sec = any(w in header_l or w in content_l for w in ["security", "secret", "auth", "leak", "vulnerability", "token", "forg", "unauthorized"])
         is_p1 = is_sec or any(w in header_l or w in content_l for w in ["p1", "race", "overflow", "crash", "panic", "toctou", "corruption", "deadlock", "blocking"])
-        is_p3 = any(w in header_l or w in content_l for w in ["nit", "p3", "style", "typo", "minor"])
-        p_code = "P0" if is_p0 else ("P1" if is_p1 else ("P3" if is_p3 else "P2"))
+        is_p3 = any(w in header_l or w in content_l for w in ["nit", "p3", "style", "typo", "minor", "low"])
+        is_explicit_p3 = any(w in header_l for w in ["p3", "[p3]", "nit:", "(p3)"])
+        p_code = "P0" if is_p0 else ("P3" if is_explicit_p3 else ("P1" if is_p1 else ("P3" if is_p3 else "P2")))
 
         camo_map = {
             "P0": "https://camo.githubusercontent.com/9e1053479d016a4a35e5337d42328403fc6ee79f5f416add2cbe946b4b532368/68747470733a2f2f6772657074696c652d7374617469632d6173736574732e73332e616d617a6f6e6177732e636f6d2f6261646765732f70302e7376673f763d39",
             "P1": "https://camo.githubusercontent.com/9b9055cf7996c10ba57796f877a6a7132a051e6be13a8103144a5829dd9a7599/68747470733a2f2f6772657074696c652d7374617469632d6173736574732e73332e616d617a6f6e6177732e636f6d2f6261646765732f70312e7376673f763d39",
             "P2": "https://camo.githubusercontent.com/65d4a57906e38192dd91dd6055ee2cd191caa5074db73473d0c1cc3183b2ea58/68747470733a2f2f6772657074696c652d7374617469632d6173736574732e73332e616d617a6f6e6177732e636f6d2f6261646765732f70322e7376673f763d39",
-            "P3": "https://greptile-static-assets.s3.amazonaws.com/badges/p3.svg?v=9",
+            "P3": "https://img.shields.io/badge/P3-Low-informational?style=flat-square",
             "Security": "https://camo.githubusercontent.com/65a7bbe5220687b7e3c2340a17370b99c80449bb6bcf8fca0e8a67bd1ce181f5/68747470733a2f2f6772657074696c652d7374617469632d6173736574732e73332e616d617a6f6e6177732e636f6d2f6261646765732f53656375726974792e7376673f763d32"
         }
 
