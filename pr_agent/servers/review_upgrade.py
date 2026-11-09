@@ -618,7 +618,7 @@ flowchart LR
     if not pr_num and hasattr(git_provider, "pr") and git_provider.pr:
         pr_num = getattr(git_provider.pr, "number", "")
 
-    retrigger_url = f"http://213.163.197.46/retrigger?repo={repo_name}&pr={pr_num}" if (repo_name and pr_num) else "http://213.163.197.46/retrigger"
+    retrigger_url = f"http://213.163.202.147/retrigger?repo={repo_name}&pr={pr_num}" if (repo_name and pr_num) else "http://213.163.202.147/retrigger"
 
     retrigger_btn = (
         f'<a href="{retrigger_url}">'
