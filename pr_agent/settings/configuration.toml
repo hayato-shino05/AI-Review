@@ -604,8 +604,8 @@ uri = "./lancedb"
 # call (no tool-use loop) and cannot execute scripts or load binary assets on
 # demand. Skills that depend on script execution will not work here.
 # See https://github.com/The-PR-Agent/pr-agent/issues/2384
-enabled = false
-paths = [] # directories to scan recursively for "*/SKILL.md"; supports ~ and $VAR
+enabled = true
+paths = ["/opt/AI-Review/skills", "skills"] # directories to scan recursively for "*/SKILL.md"; supports ~ and $VAR
 max_skills_tokens = 8000 # token budget for the combined skills_context block
 
 [artifacts]
