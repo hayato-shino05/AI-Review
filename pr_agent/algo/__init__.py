@@ -355,6 +355,7 @@ OPENROUTER_ROUTER_MODEL_ALIASES = {
 
 
 def normalize_litellm_model(model: str, custom_llm_provider: str = "") -> str:
+    custom_llm_provider = str(custom_llm_provider or "")
     if custom_llm_provider.strip().lower() not in ("", "openrouter"):
         return model
     return OPENROUTER_ROUTER_MODEL_ALIASES.get(model, model)

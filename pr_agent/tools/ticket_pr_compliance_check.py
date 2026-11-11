@@ -571,7 +571,10 @@ def fit_related_tickets_to_prompt_budget(
             lower_bound = prefix_size + 1
 
     if best_vars is None or best_budget is None:
-        raise FallbackEligibleError("Related-ticket omission marker exceeds the prompt token budget")
+        get_logger().warning("Related tickets do not fit the prompt budget, omitting all related tickets")
+        prompt_vars["related_tickets"] = []
+        prompt_vars["related_tickets_omitted"] = len(raw_tickets)
+        return prompt_vars, budget.token_handler
 
     prompt_vars = best_vars
     included_tickets = len(prompt_vars["related_tickets"])
