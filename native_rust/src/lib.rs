@@ -1,5 +1,8 @@
+use std::collections::HashSet;
 use std::ffi::CString;
 use std::os::raw::c_char;
+
+const US: char = '\u{1f}';
 
 fn to_str(ptr: *const c_char, len: usize) -> String {
     if ptr.is_null() || len == 0 {
@@ -271,6 +274,190 @@ fn extract_one(t: &str) -> Option<String> {
         }
     }
     None
+}
+
+// ---------------------------------------------------------------------------
+// Cubic Filtering Agent: Hallucination + Suppression + Noise/Dedupe
+//
+// Input payload is line-based, fields separated by 0x1f (unit separator):
+//   P\x1f<profile>                                    profile: chill|balanced|assertive
+//   H\x1f<file>\x1f<start_line>\x1f<end_line>         diff hunk (real changed lines)
+//   S\x1f<file>\x1f<keyword>                          developer-suppressed pair
+//   F\x1f<idx>\x1f<file>\x1f<start>\x1f<end>\x1f<sev>\x1f<header>\x1f<content>
+// Output: comma-separated kept finding idx values, e.g. "0,2,3"
+// ---------------------------------------------------------------------------
+
+const VAGUE: [&str; 6] = [
+    "consider checking", "might want to", "could potentially", "maybe", "nit:", "cân nhệc kiểm tra",
+];
+
+struct Finding {
+    idx: usize,
+    file: String,
+    start: usize,
+    end: usize,
+    severity: String,
+    header: String,
+    content: String,
+}
+
+fn sev_rank(s: &str) -> u8 {
+    match s {
+        "P0" => 0,
+        "P1" => 1,
+        "P2" => 2,
+        "P3" => 3,
+        _ => 4,
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn shino_filter_findings(
+    payload_ptr: *const c_char,
+    payload_len: usize,
+) -> *mut c_char {
+    let payload = to_str(payload_ptr, payload_len);
+    cstr_into_raw(filter_findings(&payload))
+}
+
+fn filter_findings(payload: &str) -> String {
+    let mut profile = String::new();
+    let mut hunks: Vec<(String, usize, usize)> = Vec::new();
+    let mut suppressed: Vec<(String, String)> = Vec::new();
+    let mut findings: Vec<Finding> = Vec::new();
+
+    for line in payload.lines() {
+        if line.is_empty() {
+            continue;
+        }
+        let parts: Vec<&str> = line.split(US).collect();
+        if parts.is_empty() {
+            continue;
+        }
+        match parts[0] {
+            "P" => {
+                if parts.len() > 1 {
+                    profile = parts[1].to_string();
+                }
+            }
+            "H" => {
+                if parts.len() >= 4 {
+                    if let (Ok(s), Ok(e)) =
+                        (parts[2].parse::<usize>(), parts[3].parse::<usize>())
+                    {
+                        hunks.push((parts[1].to_string(), s, e));
+                    }
+                }
+            }
+            "S" => {
+                if parts.len() >= 3 {
+                    suppressed.push((parts[1].to_string(), parts[2].to_string()));
+                }
+            }
+            "F" => {
+                if parts.len() >= 8 {
+                    findings.push(Finding {
+                        idx: parts[1].parse::<usize>().unwrap_or(0),
+                        file: parts[2].to_string(),
+                        start: parts[3].parse::<usize>().unwrap_or(0),
+                        end: parts[4].parse::<usize>().unwrap_or(0),
+                        severity: parts[5].to_string(),
+                        header: parts[6].to_string(),
+                        content: parts[7].to_string(),
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut kept: Vec<usize> = Vec::new(); // array indices into findings
+
+    for (i, f) in findings.iter().enumerate() {
+        // 1. Hallucination / diff-line grounding filter.
+        let file_hunks: Vec<(usize, usize)> = hunks
+            .iter()
+            .filter(|(hf, _, _)| hf == &f.file)
+            .map(|(_, s, e)| (*s, *e))
+            .collect();
+        let in_hunks = !file_hunks.is_empty();
+        let near_hunk = file_hunks.iter().any(|(s, e)| {
+            !(f.end < s.saturating_sub(20) || f.start > e + 20)
+        });
+        let is_security = f.severity == "P0"
+            || f.header.to_ascii_lowercase().contains("security")
+            || f.content.to_ascii_lowercase().contains("security");
+        if !in_hunks || (!near_hunk && !is_security) {
+            continue;
+        }
+
+        // 2. Suppression filter (developer learnings).
+        if suppressed.iter().any(|(sf, kw)| {
+            sf == &f.file && (f.header.contains(kw) || f.content.contains(kw))
+        }) {
+            continue;
+        }
+
+        // 3. Noise / profile filter.
+        if profile != "assertive" {
+            let text = format!("{} {}", f.header, f.content);
+            let tl = text.to_ascii_lowercase();
+            let vague = VAGUE.iter().any(|p| tl.contains(p));
+            let short = (f.header.len() + f.content.len()) < 40;
+            let remove = match profile.as_str() {
+                "chill" => vague && short && (f.severity == "P3" || f.severity == "P2"),
+                "balanced" => vague && short && f.severity == "P3",
+                _ => false,
+            };
+            if remove {
+                continue;
+            }
+        }
+
+        kept.push(i);
+    }
+
+    // 4. Overlap deduplication filter.
+    let mut keep_set: HashSet<usize> = kept.iter().cloned().collect();
+    for a in 0..kept.len() {
+        if !keep_set.contains(&kept[a]) {
+            continue;
+        }
+        for b in (a + 1)..kept.len() {
+            let i = kept[a];
+            let j = kept[b];
+            let fa = &findings[i];
+            let fb = &findings[j];
+            if fa.file != fb.file {
+                continue;
+            }
+            let overlap = fa.start <= fb.end + 2 && fb.start <= fa.end + 2;
+            let same_header = fa.header == fb.header;
+            if overlap || same_header {
+                let ra = sev_rank(&fa.severity);
+                let rb = sev_rank(&fb.severity);
+                if ra < rb {
+                    keep_set.remove(&j);
+                } else if rb < ra {
+                    keep_set.remove(&i);
+                } else {
+                    keep_set.remove(&j); // tie: keep the earlier one
+                }
+            }
+        }
+    }
+
+    let mut result: Vec<usize> = kept
+        .into_iter()
+        .filter(|i| keep_set.contains(i))
+        .map(|i| findings[i].idx)
+        .collect();
+    result.sort_unstable();
+    result
+        .iter()
+        .map(|i| i.to_string())
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 #[no_mangle]

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import ctypes
 import os
-import re
 from typing import List, Sequence
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -44,6 +43,8 @@ def _load_lib():
         lib.shino_extract_defs.restype = ctypes.c_void_p
         lib.shino_free_str.argtypes = [ctypes.c_void_p]
         lib.shino_free_str.restype = None
+        lib.shino_filter_findings.argtypes = [ctypes.c_char_p, ctypes.c_size_t]
+        lib.shino_filter_findings.restype = ctypes.c_void_p
         _lib = lib
         _native_loaded = True
     except OSError:
@@ -194,6 +195,103 @@ def _py_extract_defs(patch: str) -> str:
     return "\n".join(names) + "\n"
 
 
+def _py_filter_findings(
+    findings: List[dict],
+    diff_files: Sequence,
+    suppressed: Sequence[Sequence[str]] | None = None,
+    profile: str = "balanced",
+) -> List[int]:
+    """Pure-Python mirror of the Rust shino_filter_findings semantics.
+
+    Keeps finding dicts that carry ``idx`` plus file/start/end/severity/header/
+    content. Returns the kept idx values as a list of ints.
+    """
+    VAGUE = [
+        "consider checking", "might want to", "could potentially",
+        "maybe", "nit:", "cân nhệc kiểm tra",
+    ]
+    diff_set = set(diff_files)
+    supp = set()
+    if suppressed:
+        for pair in suppressed:
+            if len(pair) >= 2:
+                supp.add((pair[0], pair[1]))
+
+    def sev_rank(s: str) -> int:
+        return {"P0": 0, "P1": 1, "P2": 2, "P3": 3}.get(s, 4)
+
+    kept_idx: List[int] = []
+    for f in findings:
+        fid = int(f.get("idx", 0))
+        fname = str(f.get("file", ""))
+        start = int(f.get("start", 0))
+        end = int(f.get("end", 0))
+        sev = str(f.get("severity", ""))
+        header = str(f.get("header", ""))
+        content = str(f.get("content", ""))
+
+        # 1. Hallucination / diff-line grounding filter.
+        file_hunks = [
+            (h[1], h[2]) for h in diff_files
+            if isinstance(h, (list, tuple)) and len(h) >= 3 and h[0] == fname
+        ]
+        in_hunks = bool(file_hunks)
+        near_hunk = any(
+            not (end < s - 20 or start > e + 20) for s, e in file_hunks
+        )
+        is_security = sev == "P0" or "security" in (header + " " + content).lower()
+        if not in_hunks or (not near_hunk and not is_security):
+            continue
+
+        # 2. Suppression filter.
+        if (fname, header) in supp or (fname, content) in supp:
+            continue
+        if any(sf == fname and (kw in header or kw in content) for sf, kw in supp):
+            continue
+
+        # 3. Noise / profile filter.
+        if profile != "assertive":
+            text = (header + " " + content).lower()
+            vague = any(p in text for p in VAGUE)
+            short = len(header) + len(content) < 40
+            if profile == "chill" and vague and short and sev in ("P2", "P3"):
+                continue
+            if profile == "balanced" and vague and short and sev == "P3":
+                continue
+
+        kept_idx.append(fid)
+
+    # 4. Overlap deduplication filter.
+    keep_set = set(kept_idx)
+    kept_findings = [f for f in findings if int(f.get("idx", 0)) in keep_set]
+    for a in range(len(kept_findings)):
+        fa = kept_findings[a]
+        ia = int(fa.get("idx", 0))
+        if ia not in keep_set:
+            continue
+        for b in range(a + 1, len(kept_findings)):
+            fb = kept_findings[b]
+            ib = int(fb.get("idx", 0))
+            if ib not in keep_set:
+                continue
+            if fa.get("file") != fb.get("file"):
+                continue
+            overlap = int(fa.get("start", 0)) <= int(fb.get("end", 0)) + 2 and \
+                int(fb.get("start", 0)) <= int(fa.get("end", 0)) + 2
+            same_header = str(fa.get("header", "")) == str(fb.get("header", ""))
+            if overlap or same_header:
+                ra = sev_rank(str(fa.get("severity", "")))
+                rb = sev_rank(str(fb.get("severity", "")))
+                if ra < rb:
+                    keep_set.discard(ib)
+                elif rb < ra:
+                    keep_set.discard(ia)
+                else:
+                    keep_set.discard(ib)
+
+    return sorted(i for i in kept_idx if i in keep_set)
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -251,6 +349,66 @@ def extract_defs_fast(patch: str) -> str:
     finally:
         lib.shino_free_str(ptr)
 
+
+def filter_findings_fast(
+    findings: List[dict],
+    diff_files: Sequence,
+    suppressed: Sequence[Sequence[str]] | None = None,
+    profile: str = "balanced",
+) -> List[int]:
+    """Filter findings via native Rust libshino_native.so.
+
+    ``findings`` is a list of dicts with keys: idx, file, start, end,
+    severity, header, content. ``diff_files`` provides the real changed
+    line ranges (as "file\\x1fstart\\x1fend" strings or (file,start,end)
+    tuples) used for hallucination grounding. ``suppressed`` is a list of
+    (file, keyword) pairs the developer already rejected. ``profile`` is one
+    of chill / balanced / assertive. Returns the kept finding idx values.
+
+    Falls back to a pure-Python implementation when the native library is
+    unavailable. The returned char* buffer from Rust is freed via
+    shino_free_str inside try/finally.
+    """
+    lib = _load_lib()
+    if lib is None:
+        return _py_filter_findings(findings, diff_files, suppressed, profile)
+
+    US = "\u001f"
+    lines: List[str] = [f"P{US}{profile}"]
+
+    # diff hunks: accept "file\\x1fstart\\x1fend" strings or (file,start,end) tuples
+    for h in diff_files:
+        if isinstance(h, (list, tuple)) and len(h) >= 3:
+            lines.append(f"H{US}{h[0]}{US}{int(h[1])}{US}{int(h[2])}")
+        elif isinstance(h, str):
+            parts = h.split(US)
+            if len(parts) >= 3:
+                lines.append(f"H{US}{h}")
+
+    for pair in suppressed or []:
+        if len(pair) >= 2:
+            lines.append(f"S{US}{pair[0]}{US}{pair[1]}")
+
+    for f in findings:
+        lines.append(
+            f"F{US}{int(f.get('idx', 0))}{US}{f.get('file', '')}"
+            f"{US}{int(f.get('start', 0))}{US}{int(f.get('end', 0))}"
+            f"{US}{f.get('severity', '')}{US}{f.get('header', '')}{US}{f.get('content', '')}"
+        )
+
+    payload = "\n".join(lines).encode("utf-8", errors="ignore")
+    ptr = lib.shino_filter_findings(payload, len(payload))
+    try:
+        if not ptr:
+            return []
+        out = ctypes.string_at(ptr).decode("utf-8", errors="replace").strip()
+        if not out:
+            return []
+        return [int(x) for x in out.split(",") if x.strip()]
+    finally:
+        lib.shino_free_str(ptr)
+
+
 def risk_priority_sort(diff_files: Sequence) -> List:
     """Sort files so high-risk ones come first, using Rust native shino_score_file.
 
@@ -272,6 +430,6 @@ def risk_priority_sort(diff_files: Sequence) -> List:
             score = _py_score(name, patch)
         return score, str(name)
 
-    ranked = [( _rank(f), f) for f in items]
+    ranked = [(_rank(f), f) for f in items]
     ranked.sort(key=lambda item: item[0], reverse=True)
     return [f for _, f in ranked]

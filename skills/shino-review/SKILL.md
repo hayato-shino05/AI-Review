@@ -40,16 +40,29 @@ Suppresses habitual review biases and locks Claude into mandatory review invaria
 
 ---
 
-## 2. Four-Stage Review Architecture
+## 2. Engine Architecture (Shino Native Review Engine)
+
+The review engine runs on `pr_agent/algo/` with a Rust native core and Python orchestration:
+
+- **Rust Native Acceleration** (`native_rust/` → `libshino_native.so` via `rust_accel.py`): ctypes wrapper around `libshino_native.so` with a pure-Python fallback. Exposes `shino_score_file` (Risk-Priority Sorting for large PRs), `shino_estimate_tokens`, `shino_repair_yaml` (Native YAML Auto-Repair, 9/9 patterns), and `shino_extract_defs` (Symbol/Def extraction). Every native function degrades to pure-Python when `libshino_native.so` is missing or a symbol cannot be resolved; all `char*` buffers are freed via `shino_free_str` inside `try/finally`.
+- **Parallel GitHub I/O**: `ThreadPoolExecutor` with thread-local `requests.Session` for concurrent provider calls; `uvloop` + `httptools` for the HTTP server.
+- **9Router 3-Tier Fail-Fast Routing** (`model_routing.py`): routes small PRs to a cheaper primary model. `retry_same_model_on_timeout = false` with `openai/newapi/...` fallback. Rules are checked in order; the first rule whose diff hunk/file limits the PR fits wins. Only routes the regular model type; weak/reasoning tier choices are respected deliberately.
+- **`shino_context_enricher.py`**: Path-based Rules Discovery (`.shino/rules.yaml`, `.coderabbit.yaml`, `.greptile/rules.md`), Linked Issue Context (`Closes #N` → Acceptance Criteria for Axis 2, max 3 issues, parallel fetch), Developer Feedback Learning (`false positive` / `intentional` / resolved threads → suppression keywords), Calibrated Confidence Score (1/5 – 5/5) synced across PR Body and PR Review Summary, and Real Diff Summary (file stats, extension breakdown, top changed files, linked issues).
+- **3-Layer Skeptic Filter** (`shino_filter_findings`): Diff-Line Grounding / Hallucination Filter, Overlap Deduplication, Chill/Balanced/Assertive Profile Noise Filter, and Developer Suppression.
+- **Bảo mật & Tri-lingual** (`vi`, `ja`, `en` only): OWASP Top 10 / STRIDE, Two-Axis Isolated Audit, 12 Fowler Code Smells, 5-Question Test Gate, Anti-Hallucination & Prompt Injection Defense.
+
+---
+
+## 3. Four-Stage Review Architecture
 
 ```text
 ┌────────────────────────────────────────────────────────────────────────┐
 │                   STAGE 1: INTAKE & SURFACE DETECTION                  │
 │  - Detect surface: Local Diff | Working Branch | Remote PR (gh/glab)   │
 │  - Graph intelligence: CodeGraph exploration & GitNexus blast radius   │
-└──────────────────────────────────┬─────────────────────────────────────┘
-                                   │
-                                   ▼
+└──────────────────────────────┬─────────────────────────────────────────┘
+                               │
+                               ▼
 ┌────────────────────────────────────────────────────────────────────────┐
 │                   STAGE 2: TWO-AXIS ISOLATED AUDIT                     │
 │  ┌─────────────────────────────────┐ ┌───────────────────────────────┐ │
@@ -58,22 +71,22 @@ Suppresses habitual review biases and locks Claude into mandatory review invaria
 │  │ - 12 Fowler Code Smells         │ │ - Missing requirements audit  │ │
 │  │ - 5-Question Test Gate quality  │ │ - Scope Creep identification │ │
 │  └─────────────────────────────────┘ └───────────────────────────────┘ │
-└──────────────────────────────────┬─────────────────────────────────────┘
-                                   │
-                                   ▼
+└──────────────────────────────┬─────────────────────────────────────────┘
+                               │
+                               ▼
 ┌────────────────────────────────────────────────────────────────────────┐
-│               STAGE 3: GREPTILE ENGINE & TRIAGE INTEGRATION            │
-│  - Local CLI (`greptile review`) or Remote trigger (`@greptile review`) │
+│               STAGE 3: SHINO REVIEW ENGINE & TRIAGE INTEGRATION        │
+│  - Local CLI or Remote trigger (`@shino-review review`)                │
 │  - 4-Tier Triage: Actionable | Informational | Addressed | False-Pos   │
 │  - Confidence Scoring (1/5 - 5/5) & Camo SVG badge rendering           │
 │  - Structured XML violation tags for AI coding subagents remediation   │
-└──────────────────────────────────┬─────────────────────────────────────┘
-                                   │
-                                   ▼
+└──────────────────────────────┬─────────────────────────────────────────┘
+                               │
+                               ▼
 ┌────────────────────────────────────────────────────────────────────────┐
 │            STAGE 4: REVIEW LOOP GOVERNANCE & RESOLUTION                │
 │  - Max 3-Round Hard Stop (Escalate to Approach Review on round 3)      │
-│  - Scoped commit review for Rounds 2 & 3 (/shino-review <commit-hash>)    │
+│  - Scoped commit review for Rounds 2 & 3 (/shino-review <commit-hash>) │
 │  - Batch thread resolution via GitHub GraphQL Aliases                  │
 └────────────────────────────────────────────────────────────────────────┘
 ```
@@ -130,17 +143,17 @@ To prevent **Single-Agent Conflation** (where style and formatting discussions c
 
 ---
 
-### Stage 3: Greptile Engine & Triage Integration
+### Stage 3: Shino Review Engine & Triage Integration
 
-Integrates Greptile patterns (`check-pr`, `cli-review`, `greploop`):
+Integrates unified two-axis audit and triage patterns:
 
 1. **Triggering Review**:
-   - **Local CLI**: If `greptile` CLI is installed, execute `greptile review --json` for instant local feedback before pushing.
-   - **Remote PR Trigger**: Post review comment via `mcp__github__add_issue_comment({ issue_number: PR, body: "@greptile review" })` AND immediately launch asynchronous `Monitor` in the **exact same turn**:
+   - **Local Execution**: Run `/shino-review` or `/shino-review --loop` locally for instant feedback before pushing.
+   - **Remote PR Trigger**: Post review comment via `mcp__github__add_issue_comment({ issue_number: PR, body: "@shino-review review" })` AND immediately launch asynchronous `Monitor` in the **exact same turn**:
      ```json
      Monitor({
-       "command": "while true; do has_review=$(gh pr view <PR> --json comments,reviews --jq '[.comments[], .reviews[]] | any(.author.login == \"greptileai\" or .author.login == \"greptile\" or (.body | test(\"Greptile\"; \"i\")))' 2>/dev/null); if [ \"$has_review\" = \"true\" ]; then echo \"GREPTILE_REVIEW_RECEIVED\"; break; fi; sleep 10; done",
-       "description": "Wait for @greptile review on PR #<PR>",
+       "command": "while true; do has_review=$(gh pr view <PR> --json comments,reviews --jq '[.comments[], .reviews[]] | any(.author.login == \"shino-review\" or (.body | test(\"shino-review|review\"; \"i\")))' 2>/dev/null); if [ \"$has_review\" = \"true\" ]; then echo \"SHINO_REVIEW_RECEIVED\"; break; fi; sleep 10; done",
+       "description": "Wait for @shino-review review on PR #<PR>",
        "timeout_ms": 300000
      })
      ```
