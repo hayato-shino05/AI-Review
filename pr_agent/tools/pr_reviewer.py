@@ -1349,11 +1349,16 @@ class PRReviewer:
             if ":" not in stripped:
                 fixed.append(line)
                 continue
-            key, _, val = stripped.partition(":")
-            val = val.strip()
+            m = re.search(r"(?<!:):(?!:)", stripped)
+            if not m:
+                fixed.append(line)
+                continue
+            key = stripped[: m.start()].rstrip()
+            val = stripped[m.end() :].strip()
             # Chi tron quote khi gia tri co nguyen co chac chan gay loi YAML
             # (chua co ngoac nhung chua dau :, # hoac danh sach - ). Truoc do
             # bo qua gia tri da duoc bao ngoac de tranh double-quote.
+            # Toan tu scope :: (C++/Rust) bo qua o tren, van con lai trong val.
             need_quote = False
             if val.startswith('"') or val.startswith("'"):
                 need_quote = False

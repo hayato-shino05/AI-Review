@@ -214,19 +214,24 @@ fn fix_line(line: &str) -> String {
         }
     }
 
-    // key: value  -> quote unquoted values that contain ": " or "#".
-    // A value that already starts with a single quote cannot safely stay raw
-    // (e.g. 'nested' quote inside breaks PyYAML), so re-wrap it in double quotes.
-    if let Some(idx) = t.find(':') {
-        let key = t[..idx].trim();
-        let val = t[idx + 1..].trim();
-        if !val.is_empty()
-            && !val.starts_with('"')
-            && (val.contains(": ") || val.contains('#') || val.starts_with('\''))
-        {
-            let inner = val.trim_start_matches('\'').trim_end_matches('\'');
-            t = format!("{}: \"{}\"", key, inner);
-        }
+    // key: value  -> quote unquoted values that contain ': ' or '#'.
+    // Tim dau hai chua key/value bo qua toan tu scope :: (C++/Rust) nhan vao
+    // std::shared_lock, storage::cache::BlockCache, crc32fast::Hasher.
+    let bytes = t.as_bytes();
+    let key_colon = bytes.iter().position(|&b| b == b':').filter(|&i| {
+        let prev_ok = i == 0 || bytes[i - 1] != b':';
+        let next_ok = i + 1 == bytes.len() || bytes[i + 1] != b':';
+        prev_ok && next_ok
+    });
+    let Some(idx) = key_colon else { return t; };
+    let key = t[..idx].trim();
+    let val = t[idx + 1..].trim();
+    if !val.is_empty()
+        && !val.starts_with('"')
+        && (val.contains(": ") || val.contains('#') || val.starts_with('\''))
+    {
+        let inner = val.trim_start_matches('\'').trim_end_matches('\'');
+        t = format!("{}: \"{}\"", key, inner);
     }
 
     t
