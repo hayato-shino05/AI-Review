@@ -1,0 +1,57 @@
+{
+  "run_at": "2026-11-11T04:06:40.791248+00:00",
+  "total_cases": 4,
+  "total_duration_seconds": 0.0,
+  "recall_rate": 0.0,
+  "caught_p1": 0,
+  "total_p1": 3,
+  "false_positives": 1,
+  "average_judge_score": 0.0,
+  "violations": [
+    "Recall 0% < 90%",
+    "False positives 1 > 0",
+    "Điểm trung bình 0.00 < 3.8"
+  ],
+  "results": [
+    {
+      "case_id": "CPP-CONCURRENCY-01",
+      "severity": "P1",
+      "verdict": "FAIL",
+      "overall": 0.0,
+      "scores": {
+        "error": "'\"accuracy\"'"
+      },
+      "duration_seconds": 0.0
+    },
+    {
+      "case_id": "RUST-STATE-01",
+      "severity": "P1",
+      "verdict": "FAIL",
+      "overall": 0.0,
+      "scores": {
+        "error": "'\"accuracy\"'"
+      },
+      "duration_seconds": 0.0
+    },
+    {
+      "case_id": "PY-TIMEOUT-01",
+      "severity": "P1",
+      "verdict": "FAIL",
+      "overall": 0.0,
+      "scores": {
+        "error": "'\"accuracy\"'"
+      },
+      "duration_seconds": 0.0
+    },
+    {
+      "case_id": "CLEAN-CODE-01",
+      "severity": "none",
+      "verdict": "FAIL",
+      "overall": 0.0,
+      "scores": {
+        "error": "'\"accuracy\"'"
+      },
+      "duration_seconds": 0.0
+    }
+  ]
+}

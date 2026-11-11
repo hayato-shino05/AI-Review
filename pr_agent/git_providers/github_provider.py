@@ -2159,21 +2159,9 @@ class GithubProvider(GitProvider):
             if key in cache:
                 return cache[key]
         try:
-            session = getattr(_thread_local, "session", None)
-            if session is None:
-                session = requests.Session()
-                _thread_local.session = session
-            token = self.github_client.auth.token
-            url = f"{self.base_url}/repos/{self.repo}/contents/{quote(file_path, safe='')}?ref={sha}"
-            resp = session.get(url, headers={"Authorization": f"Bearer {token}"}, timeout=30)
-            if resp.status_code == 404:
-                return ""
-            resp.raise_for_status()
-            data = resp.json()
-            content_b64 = data.get("content", "")
-            decoded = base64.b64decode(content_b64).decode()
-        except (RequestException, UnicodeDecodeError, binascii.Error,
-                AssertionError, AttributeError, ValueError):
+            decoded = self.get_pr_file_content(file_path, sha)
+        except Exception as e:
+            get_logger().warning(f"Failed to fetch file content for {file_path} at {sha}: {e}")
             return ""
         if decoded:
             with lock:

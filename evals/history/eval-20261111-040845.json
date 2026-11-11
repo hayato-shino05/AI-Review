@@ -1,0 +1,75 @@
+{
+  "run_at": "2026-11-11T04:08:45.656003+00:00",
+  "total_cases": 4,
+  "total_duration_seconds": 31.2,
+  "recall_rate": 1.0,
+  "caught_p1": 3,
+  "total_p1": 3,
+  "false_positives": 1,
+  "average_judge_score": 3.875,
+  "violations": [
+    "False positives 1 > 0"
+  ],
+  "results": [
+    {
+      "case_id": "CPP-CONCURRENCY-01",
+      "severity": "P1",
+      "verdict": "PASS",
+      "overall": 5.0,
+      "scores": {
+        "accuracy": 5,
+        "actionability": 5,
+        "hallucination_penalty": 5,
+        "overall": 5.0,
+        "verdict": "PASS",
+        "reason": "Bot phát hiện đúng 2 lỗi P1 (data race đọc m_state thiếu khóa và TOCTOU trong vote_for) và đưa ra diff sửa khớp ground truth, không bịa vấn đề, dễ hành động."
+      },
+      "duration_seconds": 5.501
+    },
+    {
+      "case_id": "RUST-STATE-01",
+      "severity": "P1",
+      "verdict": "PASS",
+      "overall": 5.0,
+      "scores": {
+        "accuracy": 5,
+        "actionability": 5,
+        "hallucination_penalty": 5,
+        "overall": 5.0,
+        "verdict": "PASS",
+        "reason": "Bot xác định chính xác lỗi P1 (apply_entry thiếu kiểm tra committed) và đưa ra diff sửa cụ thể, không bịa vấn đề không tồn tại."
+      },
+      "duration_seconds": 18.019
+    },
+    {
+      "case_id": "PY-TIMEOUT-01",
+      "severity": "P1",
+      "verdict": "PASS",
+      "overall": 5.0,
+      "scores": {
+        "accuracy": 5,
+        "actionability": 5,
+        "hallucination_penalty": 5,
+        "overall": 5.0,
+        "verdict": "PASS",
+        "reason": "Bot xác định chính xác lỗi unhandled exception của urllib.request.urlopen và đưa ra diff sửa khớp ground truth (bắt socket.timeout/URLError), findings khả thi, không bịa vấn đề. Không bỏ sót lỗi P1."
+      },
+      "duration_seconds": 4.269
+    },
+    {
+      "case_id": "CLEAN-CODE-01",
+      "severity": "none",
+      "verdict": "FAIL",
+      "overall": 0.5,
+      "scores": {
+        "accuracy": 0,
+        "actionability": 1,
+        "hallucination_penalty": 0,
+        "overall": 0.5,
+        "verdict": "FAIL",
+        "reason": "Bot báo falsa positive trên module sạch trong khi ground truth mong đợi 0 finding; đã bịa lỗi không tồn tại và sai yêu cầu cốt lõi."
+      },
+      "duration_seconds": 3.411
+    }
+  ]
+}

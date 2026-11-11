@@ -368,7 +368,7 @@ _EXT_OVERVIEW = {
     ".yml": "Tệp cấu hình YAML.",
     ".json": "Tệp dữ liệu cấu hình JSON.",
     ".md": "Tài liệu dự án.",
-    ".dockerfile": "Tệp định nghĩa hình ảnh container.",
+    ".dockerfile": "Container image specification and build environment definition.",
 }
 
 _DEF_OVERVIEW = "Core module implementation and interface definition."
@@ -400,6 +400,12 @@ def generate_dynamic_file_overview(filename: str, patch: str) -> str:
     """Tự động trích xuất vai trò file dựa trên extension và định nghĩa trong diff."""
     _, ext = os.path.splitext(filename)
     overview = _EXT_OVERVIEW.get(ext.lower(), _DEF_OVERVIEW)
+    if overview == _DEF_OVERVIEW:
+        name = os.path.basename(filename).lower()
+        if name in ("dockerfile", "containerfile"):
+            overview = "Container image specification and build environment definition."
+        elif name == "cmakelists.txt":
+            overview = "Build system configuration and dependency orchestration."
     defs = _extract_defs(patch)
     if defs:
         return f"{overview} Định nghĩa: {', '.join(defs)}."
@@ -413,25 +419,47 @@ def _mermaid_id(name: str) -> str:
 def generate_dynamic_mermaid(files_list: list[str], patch: str) -> str:
     """Tự động sinh sơ đồ Mermaid liên kết các module thực tế trong PR (không vẽ cố định)."""
     header = "%%{init: {'theme': 'neutral'}}%%\nflowchart LR"
-    modules: list[str] = []
+    code_modules: list[str] = []
+    config_modules: list[str] = []
     seen: set[str] = set()
+    config_names = {"dockerfile", "containerfile", "cmakelists.txt"}
+    config_exts = {".toml", ".yaml", ".yml", ".json", ".md", ".mod", ".sum"}
+    code_exts = {
+        ".rs", ".py", ".js", ".ts", ".tsx", ".jsx", ".go", ".java", ".cs",
+        ".kt", ".swift", ".rb", ".php", ".cpp", ".cc", ".cxx", ".h", ".hpp",
+    }
     for f in files_list:
-        base = os.path.splitext(os.path.basename(f))[0]
+        base = os.path.basename(f)
+        low = base.lower()
+        _, ext = os.path.splitext(base)
         if not base or base in seen:
             continue
         seen.add(base)
-        modules.append(base)
-        if len(modules) >= 6:
+        if low in config_names or ext.lower() in config_exts:
+            config_modules.append(base)
+        elif ext.lower() in code_exts:
+            # Giu nguyen ten file kèm extension cho Rust de nhan biet node rieng (vd: lib.rs)
+            code_modules.append(base if ext.lower() == ".rs" else os.path.splitext(base)[0])
+        if len(code_modules) + len(config_modules) >= 6:
             break
-    if not modules:
-        modules = ["unknown"]
     lines = [header]
     if _extract_defs(patch):
         lines.append(f"  %% Định nghĩa phát hiện: {', '.join(_extract_defs(patch))}")
-    for i in range(len(modules) - 1):
-        a = _mermaid_id(modules[i])
-        b = _mermaid_id(modules[i + 1])
-        lines.append(f'  {a}["{modules[i]}"] --> {b}["{modules[i + 1]}"]')
+    if config_modules:
+        lines.append("  subgraph BuildConfig")
+        for m in config_modules:
+            mid = _mermaid_id(m)
+            label = m.replace('"', "'")
+            lines.append(f'    {mid}["{label}"]')
+        lines.append("  end")
+    for i in range(len(code_modules) - 1):
+        a = _mermaid_id(code_modules[i])
+        b = _mermaid_id(code_modules[i + 1])
+        la = code_modules[i].replace('"', "'")
+        lb = code_modules[i + 1].replace('"', "'")
+        lines.append(f'  {a}["{la}"] --> {b}["{lb}"]')
+    if not code_modules and not config_modules:
+        lines.append('  unknown["unknown"]')
     return "\n".join(lines)
 
 

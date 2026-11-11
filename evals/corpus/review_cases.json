@@ -1,0 +1,32 @@
+{
+  "cases": [
+    {
+      "id": "CPP-CONCURRENCY-01",
+      "language": "cpp",
+      "ground_truth": "P1 blocking concurrency bugs: data race on m_state (read without lock) and TOCTOU in vote_for()",
+      "severity": "P1",
+      "diff": "--- a/raft_node.cpp\n+++ b/raft_node.cpp\n@@ -10,12 +10,12 @@ class RaftNode {\n  private:\n    std::mutex m_mutex;\n    RaftState m_state;\n\n   public:\n    RaftState get_state() const {\n-      return m_state;\n+      std::lock_guard<std::mutex> lock(m_mutex);\n+      return m_state;\n    }\n\n    bool vote_for(int term, int candidate) {\n-      if (m_state.current_term == term && m_state.voted_for == -1) {\n+      std::lock_guard<std::mutex> lock(m_mutex);\n+      if (m_state.current_term == term && m_state.voted_for == -1) {\n         m_state.voted_for = candidate;\n         return true;\n       }\n      return false;\n    }\n  };\n"
+    },
+    {
+      "id": "RUST-STATE-01",
+      "language": "rust",
+      "ground_truth": "P1 blocking uncommitted log apply: apply_entry() does not check committed: bool",
+      "severity": "P1",
+      "diff": "--- a/state_machine.rs\n+++ b/state_machine.rs\n@@ -5,10 +5,12 @@ impl RaftStateMachine {\n     pub fn apply_entry(&mut self, entry: LogEntry) {\n-      self.apply_to_store(entry.command);\n+      if !entry.committed {\n+          return;\n+      }\n+      self.apply_to_store(entry.command);\n       self.last_applied = entry.index;\n     }\n   }\n"
+    },
+    {
+      "id": "PY-TIMEOUT-01",
+      "language": "python",
+      "ground_truth": "P1/P2 unhandled exception: urllib.request.urlopen without catching socket.timeout/URLError",
+      "severity": "P1",
+      "diff": "--- a/client.py\n+++ b/client.py\n@@ -1,5 +1,10 @@\n import urllib.request\n+import socket\n from urllib.error import URLError\n\n def fetch(url):\n-    return urllib.request.urlopen(url, timeout=10).read()\n+    try:\n+        return urllib.request.urlopen(url, timeout=10).read()\n+    except (socket.timeout, URLError) as exc:\n+        return f\"error: {exc}\"\n"
+    },
+    {
+      "id": "CLEAN-CODE-01",
+      "language": "python",
+      "ground_truth": "0 bugs; expected bot to return 0 findings (False Positive = 0) and confidence 5/5",
+      "severity": "none",
+      "diff": "--- a/clean_module.py\n+++ b/clean_module.py\n@@ -1,15 +1,20 @@\n from typing import List, Optional\n from pydantic import BaseModel, Field, validator\n\n class Item(BaseModel):\n     name: str = Field(min_length=1)\n     quantity: int = Field(ge=0)\n\n     @validator('name')\n     def name_not_empty(cls, v):\n         if not v or not v.strip():\n             raise ValueError('name must not be blank')\n         return v.strip()\n\n def process(items: List[Item]) -> List[str]:\n     results: List[str] = []\n     for item in items:\n         results.append(f\"{item.name}:{item.quantity}\")\n     return results\n"
+    }
+  ]
+}
