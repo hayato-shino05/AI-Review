@@ -1670,14 +1670,18 @@ class PRReviewer:
             "P1": "https://camo.githubusercontent.com/9b9055cf7996c10ba57796f877a6a7132a051e6be13a8103144a5829dd9a7599/68747470733a2f2f6772657074696c652d7374617469632d6173736574732e73332e616d617a6f6e6177732e636f6d2f6261646765732f70312e7376673f763d39",
             "P2": "https://camo.githubusercontent.com/65d4a57906e38192dd91dd6055ee2cd191caa5074db73473d0c1cc3183b2ea58/68747470733a2f2f6772657074696c652d7374617469632d6173736574732e73332e616d617a6f6e6177732e636f6d2f6261646765732f70322e7376673f763d39",
             "P3": "https://camo.githubusercontent.com/8df84040dec6ed21e795add369b5db7d9be8580c4cfc47fb9b77c63f509e31f7/687474703a2f2f3231332e3136332e3230322e3134372f6261646765732f70332e737667",
-            "Security": "https://camo.githubusercontent.com/65a7bbe5220687b7e3c2340a17370b99c80449bb6bcf8fca0e8a67bd1ce181f5/68747470733a2f2f6772657074696c652d7374617469632d6173736574732e73332e616d617a6f6e6177732e636f6d2f6261646765732f53656375726974792e7376673f763d32"
+            "Security": "https://camo.githubusercontent.com/65a7bbe5220687b7e3c2340a17370b99c80449bb6bcf8fca0e8a67bd1ce181f5/68747470733a2f2f6772657074696c652d7374617469632d6173736574732e73332e616d617a6f6e6177732e636f6d2f6261646765732f53656375726974792e7376673f763d32",
+            "Blocking": "http://213.163.202.147/badges/blocking.svg",
+            "Important": "http://213.163.202.147/badges/important.svg"
         }
 
         badge_html = f'<a href="#"><img alt="{p_code}" src="{camo_map[p_code]}" align="top"></a>'
         sec_html = f' <a href="#"><img alt="security" src="{camo_map["Security"]}" align="top"></a>' if is_sec else ""
         line_str = f"{start_line}-{end_line}" if start_line != end_line else f"{start_line}"
 
-        body = f"""{badge_html}{sec_html} **{issue_header}**\n\n{issue_content}\n\n<details><summary>Prompt To Fix With AI</summary>\n\n`````markdown\nThis is a comment left during a code review.\nPath: {relevant_file}\nLine: {line_str}\n\nComment:\n**{issue_header}**\n\n{issue_content}\n\n---\n\nFor each issue above, determine whether it is valid and should be fixed. If so, fix it directly.\n`````\n</details>"""
+        from pr_agent.servers.review_upgrade import format_severity_badges
+        content_formatted = format_severity_badges(issue_content)
+        body = f"""{badge_html}{sec_html} **{issue_header}**\n\n{content_formatted}\n\n<details><summary>Prompt To Fix With AI</summary>\n\n`````markdown\nThis is a comment left during a code review.\nPath: {relevant_file}\nLine: {line_str}\n\nComment:\n**{issue_header}**\n\n{content_formatted}\n\n---\n\nFor each issue above, determine whether it is valid and should be fixed. If so, fix it directly.\n`````\n</details>"""
         return {"body": body,
                 "relevant_file": relevant_file,
                 "relevant_lines_start": start_line,

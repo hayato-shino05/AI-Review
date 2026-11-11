@@ -44,8 +44,8 @@ INSTRUCTIONS_VI = """
   + Tọa độ chính xác dạng `file_path:line_number`.
   + Kịch bản gây lỗi thực tế (concrete failure scenario) mô tả điều kiện đầu vào dẫn đến crash, leak hoặc sai lệch dữ liệu.
   + Phân cấp mức độ nghiêm trọng:
-    * 🔴 [BLOCKING]: Lỗi logic nghiêm trọng, rò rỉ bộ nhớ, bảo mật, race condition, hoặc phá vỡ hợp đồng API.
-    * 🟡 [IMPORTANT]: Nguy cơ tiềm ẩn, suy giảm hiệu năng, xử lý ngoại lệ lỏng lẻo, vi phạm kiến trúc.
+    * [BLOCKING]: Lỗi logic nghiêm trọng, rò rỉ bộ nhớ, bảo mật, race condition, hoặc phá vỡ hợp đồng API.
+    * [IMPORTANT]: Nguy cơ tiềm ẩn, suy giảm hiệu năng, xử lý ngoại lệ lỏng lẻo, vi phạm kiến trúc.
     * 🟢 [NIT]: Tối ưu nhỏ, tính dễ đọc, quy ước đặt tên (chỉ nêu khi thực sự cần thiết, không bắt lỗi tủn mủn).
     * ❓ [QUESTION]: Điểm chưa rõ ý đồ kiến trúc, cần tác giả giải trình chứng cứ.
 
@@ -115,8 +115,8 @@ INSTRUCTIONS_JA = """
   + 正確な位置：`file_path:line_number`
   + 具体的障害シナリオ：クラッシュ、メモリリーク、データ不整合を引き起こす具体的な入力条件
   + 重大度レベル：
-    * 🔴 [BLOCKING]: 深刻なロジック欠陥、メモリリーク、セキュリティ脆弱性、データ競合、API契約破壊。
-    * 🟡 [IMPORTANT]: 潜在的リスク、パフォーマンス低下、不十分な例外処理、アーキテクチャ違反。
+    * [BLOCKING]: 深刻なロジック欠陥、メモリリーク、セキュリティ脆弱性、データ競合、API契約破壊。
+    * [IMPORTANT]: 潜在的リスク、パフォーマンス低下、不十分な例外処理、アーキテクチャ違反。
     * 🟢 [NIT]: 軽微な可読性向上、命名改善（重箱の隅をつつく指摘は避けること）。
     * ❓ [QUESTION]: 設計意図が不明瞭であり、検証証拠を求める事項。
 
@@ -184,8 +184,8 @@ INSTRUCTIONS_EN = """
   + Exact coordinates: `file_path:line_number`.
   + Concrete failure mechanics: specific inputs/state causing crashes, memory corruption, or logic regressions.
   + Severity classification:
-    * 🔴 [BLOCKING]: Critical logic flaw, memory leak, security vulnerability, data race, or broken contract.
-    * 🟡 [IMPORTANT]: Latent risk, performance degradation, sloppy exception handling, architectural violation.
+    * [BLOCKING]: Critical logic flaw, memory leak, security vulnerability, data race, or broken contract.
+    * [IMPORTANT]: Latent risk, performance degradation, sloppy exception handling, architectural violation.
     * 🟢 [NIT]: Minor readability improvement, naming consistency (omit trivial nitpicks).
     * ❓ [QUESTION]: Unclear architectural invariant requiring explicit justification.
 
@@ -626,6 +626,23 @@ def _format_command(rest: str, pr_title: str = "", pr_body: str = "") -> str:
 # 4. Greptile PR-Body Appender & Cubic Review Generator (20 PRs Benchmark)
 # ---------------------------------------------------------------------------
 
+
+BLOCKING_BADGE_URL = "http://213.163.202.147/badges/blocking.svg"
+IMPORTANT_BADGE_URL = "http://213.163.202.147/badges/important.svg"
+BLOCKING_BADGE_HTML = f'<img alt="BLOCKING" src="{BLOCKING_BADGE_URL}" align="top">&nbsp;'
+IMPORTANT_BADGE_HTML = f'<img alt="IMPORTANT" src="{IMPORTANT_BADGE_URL}" align="top">&nbsp;'
+
+
+def format_severity_badges(text: str) -> str:
+    """Replace [🔴 BLOCKING], [🟡 IMPORTANT] or [BLOCKING]/[IMPORTANT] with clean vector SVG badges."""
+    if not text:
+        return text
+    # Replace any variant of [🔴 BLOCKING], 🔴 [BLOCKING], [BLOCKING], [🔴BLOCKING]
+    text = re.sub(r'(\[?\s*🔴\s*\[?\s*BLOCKING\s*\]?\s*\]?|\[BLOCKING\])\s*', BLOCKING_BADGE_HTML, text, flags=re.IGNORECASE)
+    # Replace any variant of [🟡 IMPORTANT], 🟡 [IMPORTANT], [IMPORTANT], [🟡IMPORTANT]
+    text = re.sub(r'(\[?\s*🟡\s*\[?\s*IMPORTANT\s*\]?\s*\]?|\[IMPORTANT\])\s*', IMPORTANT_BADGE_HTML, text, flags=re.IGNORECASE)
+    return text
+
 def format_and_publish_benchmark_review(data: dict, git_provider, main_language: str = "en") -> str:
     """
     Synthesizes the review into 2 components matching Omoide #104 and Document-Manager #85:
@@ -724,7 +741,9 @@ def format_and_publish_benchmark_review(data: dict, git_provider, main_language:
         "P1": "https://camo.githubusercontent.com/9b9055cf7996c10ba57796f877a6a7132a051e6be13a8103144a5829dd9a7599/68747470733a2f2f6772657074696c652d7374617469632d6173736574732e73332e616d617a6f6e6177732e636f6d2f6261646765732f70312e7376673f763d39",
         "P2": "https://camo.githubusercontent.com/65d4a57906e38192dd91dd6055ee2cd191caa5074db73473d0c1cc3183b2ea58/68747470733a2f2f6772657074696c652d7374617469632d6173736574732e73332e616d617a6f6e6177732e636f6d2f6261646765732f70322e7376673f763d39",
         "P3": "https://camo.githubusercontent.com/8df84040dec6ed21e795add369b5db7d9be8580c4cfc47fb9b77c63f509e31f7/687474703a2f2f3231332e3136332e3230322e3134372f6261646765732f70332e737667",
-        "Security": "https://camo.githubusercontent.com/65a7bbe5220687b7e3c2340a17370b99c80449bb6bcf8fca0e8a67bd1ce181f5/68747470733a2f2f6772657074696c652d7374617469632d6173736574732e73332e616d617a6f6e6177732e636f6d2f6261646765732f53656375726974792e7376673f763d32"
+        "Security": "https://camo.githubusercontent.com/65a7bbe5220687b7e3c2340a17370b99c80449bb6bcf8fca0e8a67bd1ce181f5/68747470733a2f2f6772657074696c652d7374617469632d6173736574732e73332e616d617a6f6e6177732e636f6d2f6261646765732f53656375726974792e7376673f763d32",
+        "Blocking": BLOCKING_BADGE_URL,
+        "Important": IMPORTANT_BADGE_URL
     }
 
     for idx, issue in enumerate(filtered_issues, 1):
@@ -771,10 +790,11 @@ def format_and_publish_benchmark_review(data: dict, git_provider, main_language:
 
         findings_html.append(f'{idx}. {badge_img}&nbsp;{sec_img}**{header}** `file: {file_path}:{start_line}` <a href="#">▶</a>')
 
+        formatted_content = format_severity_badges(content)
         agent_prompt_issues.append(f"""### Issue {idx}
 {file_path}:{start_line}-{end_line}
 **{header}**
-{content}
+{formatted_content}
 
 **How this was verified:** Static call graph trace and invariant verification.
 """)
