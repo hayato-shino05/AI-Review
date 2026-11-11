@@ -1274,8 +1274,57 @@ class PRReviewer:
         return response
 
     @staticmethod
+    def repair_yaml_string(yaml_str: str) -> str:
+        """Tiền xử lý và sửa các lỗi cú pháp YAML phổ biến do LLM sinh ra trước khi parse.
+
+        Xử lý: bo các dòng phân cách tài liệu '---'/'...'; bo ngoặc kép cho giá trị chứa
+        dấu hai chấm không nháy (url: http://host:8080), dấu '#' bị hiểu nhầm là nhận xét,
+        hoặc danh sách gạch ngang (JIRA-123 - JIRA-456); giữ nguyên thụt dang của từng dòng.
+        """
+        if not yaml_str:
+            return yaml_str
+        lines = yaml_str.split("\n")
+        fixed: list[str] = []
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                fixed.append(line)
+                continue
+            # Bỏ dòng phân cách tài liệu YAML ('---', '...') do LLM thường thêm vào đầu/cuối.
+            if stripped in ("---", "..."):
+                continue
+            indent = line[: len(line) - len(line.lstrip())]
+            # Bỏ qua các khối literal scalar '|'/'|2' đã được xử lý riêng ở nơi khác.
+            if stripped.startswith("|") or stripped.startswith(">"):
+                fixed.append(line)
+                continue
+            if ":" not in stripped:
+                fixed.append(line)
+                continue
+            key, _, val = stripped.partition(":")
+            val = val.strip()
+            need_quote = bool(val) and not (
+                val.startswith('"') or val.startswith("'") or val.startswith("[") or val.startswith("{")
+            )
+            # Dấu hai chấm không nháy trong giá trị (http://host:8080)
+            if ":" in val:
+                need_quote = True
+            # Dấu '#' giữa/cuối giá trị bị hiểu nhầm là nhận xét
+            if "#" in val and not val.lstrip().startswith("#"):
+                need_quote = True
+            # Giá trị trông như danh sách gạch ngang do LLM nhầm
+            if re.search(r"(^|\s)-\s+\S", val):
+                need_quote = True
+            if need_quote:
+                fixed.append(f'{indent}{key}: "{val}"')
+                continue
+            fixed.append(line)
+        return "\n".join(fixed)
+
+    @staticmethod
     def _load_review_yaml(prediction: str) -> dict:
-        return load_yaml(prediction.strip(),
+        repaired = PRReviewer.repair_yaml_string(prediction.strip())
+        return load_yaml(repaired,
                          keys_fix_yaml=["ticket_compliance_check", "estimated_effort_to_review_[1-5]:", "risk_level:",
                                         "merge_recommendation:", "security_concerns:", "key_issues_to_review:",
                                         "relevant_file:", "relevant_line:", "suggestion:"],

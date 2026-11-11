@@ -7,6 +7,7 @@ Synthesizing:
 - Dynamic Tri-lingual Adapter: Japanese (ja), Vietnamese (vi), English (en)
 """
 
+import os
 import re
 from typing import Tuple, Optional
 from pr_agent.config_loader import get_settings
@@ -76,6 +77,15 @@ INSTRUCTIONS_VI = """
 
 ### 5. Ngôn Ngữ Bắt Buộc:
 - BẮT BUỘC toàn bộ phân tích, nhận xét, giải thích phải viết bằng **TIẾNG VIỆT** (VIETNAMESE) có dấu đầy đủ 100%. Giữ nguyên định danh code trong dấu backtick (`).
+
+### 6. Anti-Hallucination (cấm suy đoán code ngoài diff):
+- Tuyệt đối KHÔNG suy đoán về mã nằm ngoài diff đã cung cấp. Nếu nội dung chưa xác minh được, bắt buộc đánh dấu là "chưa xác định" và KHÔNG đưa ra khẳng định sai sự thật.
+
+### 7. 12 Fowler Code Smells (cấm các mù code sau):
+- Primitive Obsession, Shotgun Surgery, Feature Envy, Long Method, Large Class, Data Clumps, Switch Statements, Duplicate Code, Lazy Class, Speculative Generality, Temporary Field, Message Chains.
+
+### 8. 5-Question Test Gate (cấm junk tests):
+- Cấm các unit test chỉ mock gọi mock (mock-mirror tautologies), assert-true tautologies, test-only production seams (thêm public method/cờ chỉ để phục vụ test), và coverage-only bloat.
 """
 
 INSTRUCTIONS_JA = """
@@ -135,6 +145,15 @@ INSTRUCTIONS_JA = """
 
 ### 5. 必須言語要件:
 - すべての分析、レビューコメント、解説を100%自然で専門的な**日本語**（JAPANESE）で記述してください。英語での出力は厳禁です（コード識別子を除く）。
+
+### 6. Anti-Hallucination (拡張コンテンツ以外のコードを推測禁止):
+- diff で提供されたコード以外について決して推測しないこと。未検証の内容は「未確認」と明示し、事実に反する主張をしてはならない。
+
+### 7. 12 Fowler Code Smells (以下の臭いコードを禁止):
+- Primitive Obsession, Shotgun Surgery, Feature Envy, Long Method, Large Class, Data Clumps, Switch Statements, Duplicate Code, Lazy Class, Speculative Generality, Temporary Field, Message Chains.
+
+### 8. 5-Question Test Gate (junk testを禁止):
+- モックのみをテストする無意味なテスト（mock-mirror tautologies）、常に真となるアサーション、テスト専用のプロダクションシーム（テストのためだけに public メソッド/フラグを追加）、カバー率稼ぎのためだけのテストを禁止すること。
 """
 
 INSTRUCTIONS_EN = """
@@ -195,6 +214,15 @@ INSTRUCTIONS_EN = """
 
 ### 5. Language of Output:
 - Respond entirely in professional, concise, actionable **ENGLISH**. Keep code identifiers wrapped in backticks (`).
+
+### 6. Anti-Hallucination (do not speculate on code outside the diff):
+- Do NOT speculate on code outside the provided diff. If content cannot be verified, mark it "unverified" and do not assert false facts.
+
+### 7. 12 Fowler Code Smells (banned code smells):
+- Primitive Obsession, Shotgun Surgery, Feature Envy, Long Method, Large Class, Data Clumps, Switch Statements, Duplicate Code, Lazy Class, Speculative Generality, Temporary Field, Message Chains.
+
+### 8. 5-Question Test Gate (ban junk tests):
+- Ban mock-mirror tautologies, assert-true tautologies, test-only production seams (adding public methods/flags solely to enable testing), and coverage-only bloat.
 """
 
 # ---------------------------------------------------------------------------
@@ -293,6 +321,103 @@ When generating or updating the PR Description / Body, you MUST follow this 2-ti
 <!-- End of auto-generated description by @shino-review. -->
 [NOTE: Do NOT include any Cubic badges].
 """
+
+# ---------------------------------------------------------------------------
+# 2.5. Dynamic PR overview & Mermaid diagram (replaces hardcoded C++/Rust/Python)
+# ---------------------------------------------------------------------------
+
+_EXT_OVERVIEW = {
+    ".py": "Python module — định nghĩa hàm/lớp xử lý nghiệp vụ.",
+    ".js": "JavaScript module — định nghĩa thành phần React/Node xử lý yêu cầu web.",
+    ".ts": "TypeScript module — định nghĩa kiểu dữ liệu và thành phần frontend.",
+    ".tsx": "React TypeScript component — giao diện người dùng.",
+    ".jsx": "React JavaScript component — giao diện người dùng.",
+    ".go": "Go module — định nghĩa gói API/microservice.",
+    ".rs": "Rust module — định nghĩa cấu trúc và xử lý hệ thống.",
+    ".cpp": "C++ module — định nghĩa lớp và xử lý native.",
+    ".cc": "C++ module — định nghĩa lớp và xử lý native.",
+    ".cxx": "C++ module — định nghĩa lớp và xử lý native.",
+    ".h": "C/C++ header — khai báo giao diện module.",
+    ".hpp": "C++ header — khai báo giao diện module.",
+    ".java": "Java module — định nghĩa lớp nghiệp vụ.",
+    ".rb": "Ruby module — định nghĩa lớp xử lý.",
+    ".php": "PHP module — định nghĩa lớp điều khiển/nghiệp vụ.",
+    ".cs": "C# module — định nghĩa lớp nghiệp vụ.",
+    ".kt": "Kotlin module — định nghĩa lớp và xử lý.",
+    ".swift": "Swift module — định nghĩa lớp và giao diện.",
+    ".toml": "Tệp cấu hình dự án (các phụ thuộc, meta).",
+    ".mod": "Go module — cấu hình dependency và phiên bản gói.",
+    ".sum": "Go checksum — xác thực tính toàn vẹn dependency.",
+    ".yaml": "Tệp cấu hình YAML.",
+    ".yml": "Tệp cấu hình YAML.",
+    ".json": "Tệp dữ liệu cấu hình JSON.",
+    ".md": "Tài liệu dự án.",
+    ".dockerfile": "Tệp định nghĩa hình ảnh container.",
+}
+
+_DEF_OVERVIEW = "Core module implementation and interface definition."
+
+
+def _extract_defs(patch: str) -> list[str]:
+    """Trích xuất định nghĩa class/def/fn/struct/interface từ diff (tối đa 5 cái đầu)."""
+    defs: list[str] = []
+    if not patch:
+        return defs
+    for line in patch.split("\n"):
+        body = line.strip().lstrip("+- ").strip()
+        if not body or body.startswith("@@"):
+            continue
+        m = re.match(
+            r"^\s*(?:def\s+(\w+)|class\s+(\w+)|fn\s+(\w+)|struct\s+(\w+)"
+            r"|interface\s+(\w+)|enum\s+(\w+)|type\s+(\w+))",
+            body,
+        )
+        if m:
+            name = next(g for g in m.groups() if g)
+            defs.append(name)
+            if len(defs) >= 5:
+                break
+    return defs
+
+
+def generate_dynamic_file_overview(filename: str, patch: str) -> str:
+    """Tự động trích xuất vai trò file dựa trên extension và định nghĩa trong diff."""
+    _, ext = os.path.splitext(filename)
+    overview = _EXT_OVERVIEW.get(ext.lower(), _DEF_OVERVIEW)
+    defs = _extract_defs(patch)
+    if defs:
+        return f"{overview} Định nghĩa: {', '.join(defs)}."
+    return overview
+
+
+def _mermaid_id(name: str) -> str:
+    return re.sub(r"[^A-Za-z0-9]", "", name) or "node"
+
+
+def generate_dynamic_mermaid(files_list: list[str], patch: str) -> str:
+    """Tự động sinh sơ đồ Mermaid liên kết các module thực tế trong PR (không vẽ cố định)."""
+    header = "%%{init: {'theme': 'neutral'}}%%\nflowchart LR"
+    modules: list[str] = []
+    seen: set[str] = set()
+    for f in files_list:
+        base = os.path.splitext(os.path.basename(f))[0]
+        if not base or base in seen:
+            continue
+        seen.add(base)
+        modules.append(base)
+        if len(modules) >= 6:
+            break
+    if not modules:
+        modules = ["unknown"]
+    lines = [header]
+    if _extract_defs(patch):
+        lines.append(f"  %% Định nghĩa phát hiện: {', '.join(_extract_defs(patch))}")
+    for i in range(len(modules) - 1):
+        a = _mermaid_id(modules[i])
+        b = _mermaid_id(modules[i + 1])
+        lines.append(f'  {a}["{modules[i]}"] --> {b}["{modules[i + 1]}"]')
+    return "\n".join(lines)
+
 
 # ---------------------------------------------------------------------------
 # 2. Language Detection Logic (ja, vi, en)
@@ -580,36 +705,16 @@ def format_and_publish_benchmark_review(data: dict, git_provider, main_language:
         filename = getattr(f, "filename", str(f))
         if filename.endswith(".gitignore"):
             continue
-        if "memory_pool" in filename:
-            overview = "Implements SlabAllocator with cache-line alignment and bounds check."
-        elif "render_engine" in filename:
-            overview = "Multi-backend render coordinator with frame metrics and software rasterizer."
-        elif "cache.rs" in filename:
-            overview = "Thread-safe TTL cache with LRU eviction policy."
-        elif "event_bus.rs" in filename:
-            overview = "Broadcast channel-based event bus with priority levels."
-        elif "security.rs" in filename:
-            overview = "Constant-time token verification and RBAC authorization."
-        elif "metrics_analyzer" in filename:
-            overview = "Streaming latency percentile calculator and SLA anomaly detector."
-        elif "CMakeLists.txt" in filename:
-            overview = "Configures C++20 static library build with strict compiler warnings."
-        elif "Cargo.toml" in filename:
-            overview = "Configures Rust package dependencies for tokio, serde, and subtle."
-        elif "pyproject.toml" in filename:
-            overview = "Defines Python package configuration with pydantic dependencies."
-        else:
-            overview = "Core module implementation and interface definition."
+        patch = getattr(f, "patch", None) or ""
+        overview = generate_dynamic_file_overview(filename, patch)
         file_rows.append(f"| {filename} | {overview} |")
 
     files_table = "| Filename | Overview |\n|---|---|\n" + "\n".join(file_rows)
 
-    # 4. Build Mermaid Diagram Walkthrough (as seen in Omoide #104 & Document-Manager #85)
-    diagram = """%%{init: {'theme': 'neutral'}}%%
-flowchart LR
-  CPP["C++20 Native Core\\nRenderEngine + SlabAllocator"] --> RUST["Rust Async Systems\\nEventBus + TtlCache + SecurityContext"]
-  RUST --> PY["Python Telemetry\\nMetricsAnalyzer + PercentileReport"]
-  CPP --> BUILD["Build Systems\\nCMake + Cargo + Hatchling"]"""
+    # 4. Build Mermaid Diagram Walkthrough (dynamic from real PR files)
+    diff_filenames = [getattr(f, "filename", str(f)) for f in diff_files]
+    all_patch = "\n".join(getattr(f, "patch", "") or "" for f in diff_files)
+    diagram = generate_dynamic_mermaid(diff_filenames, all_patch)
 
     # 5. Assemble Greptile Block (Matches Omoide #104 & Document-Manager #85 exactly)
     latest_commit_url = git_provider.get_latest_commit_url() if hasattr(git_provider, "get_latest_commit_url") else "#"
