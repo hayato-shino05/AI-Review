@@ -1672,7 +1672,9 @@ class PRReviewer:
             "P3": "https://camo.githubusercontent.com/8df84040dec6ed21e795add369b5db7d9be8580c4cfc47fb9b77c63f509e31f7/687474703a2f2f3231332e3136332e3230322e3134372f6261646765732f70332e737667",
             "Security": "https://camo.githubusercontent.com/65a7bbe5220687b7e3c2340a17370b99c80449bb6bcf8fca0e8a67bd1ce181f5/68747470733a2f2f6772657074696c652d7374617469632d6173736574732e73332e616d617a6f6e6177732e636f6d2f6261646765732f53656375726974792e7376673f763d32",
             "Blocking": "http://213.163.202.147/badges/blocking.svg",
-            "Important": "http://213.163.202.147/badges/important.svg"
+            "Important": "http://213.163.202.147/badges/important.svg",
+            "Nit": "http://213.163.202.147/badges/nit.svg",
+            "Question": "http://213.163.202.147/badges/question.svg"
         }
 
         badge_html = f'<a href="#"><img alt="{p_code}" src="{camo_map[p_code]}" align="top"></a>'

@@ -46,8 +46,8 @@ INSTRUCTIONS_VI = """
   + Phân cấp mức độ nghiêm trọng:
     * [BLOCKING]: Lỗi logic nghiêm trọng, rò rỉ bộ nhớ, bảo mật, race condition, hoặc phá vỡ hợp đồng API.
     * [IMPORTANT]: Nguy cơ tiềm ẩn, suy giảm hiệu năng, xử lý ngoại lệ lỏng lẻo, vi phạm kiến trúc.
-    * 🟢 [NIT]: Tối ưu nhỏ, tính dễ đọc, quy ước đặt tên (chỉ nêu khi thực sự cần thiết, không bắt lỗi tủn mủn).
-    * ❓ [QUESTION]: Điểm chưa rõ ý đồ kiến trúc, cần tác giả giải trình chứng cứ.
+    * [NIT]: Tối ưu nhỏ, tính dễ đọc, quy ước đặt tên (chỉ nêu khi thực sự cần thiết, không bắt lỗi tủn mủn).
+    * [QUESTION]: Điểm chưa rõ ý đồ kiến trúc, cần tác giả giải trình chứng cứ.
 
 ### 2. Quản Trị Vòng Review (4 Quy Tắc Vàng - rules/execution.md)
 - **Gom nhóm lỗi theo Pattern (Pattern Grouping)**: Gom các lỗi có cùng bản chất kỹ thuật để giải quyết triệt để tại **Root-Cause Choke Point** (điểm nghẽn cốt lõi dùng chung), nghiêm cấm sửa chắp vá từng vị trí gọi riêng lẻ.
@@ -117,8 +117,8 @@ INSTRUCTIONS_JA = """
   + 重大度レベル：
     * [BLOCKING]: 深刻なロジック欠陥、メモリリーク、セキュリティ脆弱性、データ競合、API契約破壊。
     * [IMPORTANT]: 潜在的リスク、パフォーマンス低下、不十分な例外処理、アーキテクチャ違反。
-    * 🟢 [NIT]: 軽微な可読性向上、命名改善（重箱の隅をつつく指摘は避けること）。
-    * ❓ [QUESTION]: 設計意図が不明瞭であり、検証証拠を求める事項。
+    * [NIT]: 軽微な可読性向上、命名改善（重箱の隅をつつく指摘は避けること）。
+    * [QUESTION]: 設計意図が不明瞭であり、検証証拠を求める事項。
 
 ### 2. レビュー・ループ統治 (4つの黄金律 - rules/execution.md)
 - **パターングループ化と根本原因の集約修正 (Pattern Grouping & Root-Cause Choke Point)**: 呼び出し箇所ごとの対症療法パッチを禁止し、共通のチョークポイントで根本解決してください。
@@ -186,8 +186,8 @@ INSTRUCTIONS_EN = """
   + Severity classification:
     * [BLOCKING]: Critical logic flaw, memory leak, security vulnerability, data race, or broken contract.
     * [IMPORTANT]: Latent risk, performance degradation, sloppy exception handling, architectural violation.
-    * 🟢 [NIT]: Minor readability improvement, naming consistency (omit trivial nitpicks).
-    * ❓ [QUESTION]: Unclear architectural invariant requiring explicit justification.
+    * [NIT]: Minor readability improvement, naming consistency (omit trivial nitpicks).
+    * [QUESTION]: Unclear architectural invariant requiring explicit justification.
 
 ### 2. Review Loop Governance (The 4 Golden Rules per rules/execution.md)
 - **Pattern Grouping & Root-Cause Choke Point**: Group defects by conceptual pattern. Mandate single-point remediation at shared choke points rather than caller-site symptom patching.
@@ -629,18 +629,27 @@ def _format_command(rest: str, pr_title: str = "", pr_body: str = "") -> str:
 
 BLOCKING_BADGE_URL = "http://213.163.202.147/badges/blocking.svg"
 IMPORTANT_BADGE_URL = "http://213.163.202.147/badges/important.svg"
+NIT_BADGE_URL = "http://213.163.202.147/badges/nit.svg"
+QUESTION_BADGE_URL = "http://213.163.202.147/badges/question.svg"
+
 BLOCKING_BADGE_HTML = f'<img alt="BLOCKING" src="{BLOCKING_BADGE_URL}" align="top">&nbsp;'
 IMPORTANT_BADGE_HTML = f'<img alt="IMPORTANT" src="{IMPORTANT_BADGE_URL}" align="top">&nbsp;'
+NIT_BADGE_HTML = f'<img alt="NIT" src="{NIT_BADGE_URL}" align="top">&nbsp;'
+QUESTION_BADGE_HTML = f'<img alt="QUESTION" src="{QUESTION_BADGE_URL}" align="top">&nbsp;'
 
 
 def format_severity_badges(text: str) -> str:
-    """Replace [🔴 BLOCKING], [🟡 IMPORTANT] or [BLOCKING]/[IMPORTANT] with clean vector SVG badges."""
+    """Replace [BLOCKING], [IMPORTANT], [NIT], [QUESTION] with clean vector SVG badges."""
     if not text:
         return text
-    # Replace any variant of [🔴 BLOCKING], 🔴 [BLOCKING], [BLOCKING], [🔴BLOCKING]
+    # Replace any variant of [🔴 BLOCKING], 🔴 [BLOCKING], [BLOCKING]
     text = re.sub(r'(\[?\s*🔴\s*\[?\s*BLOCKING\s*\]?\s*\]?|\[BLOCKING\])\s*', BLOCKING_BADGE_HTML, text, flags=re.IGNORECASE)
-    # Replace any variant of [🟡 IMPORTANT], 🟡 [IMPORTANT], [IMPORTANT], [🟡IMPORTANT]
+    # Replace any variant of [🟡 IMPORTANT], 🟡 [IMPORTANT], [IMPORTANT]
     text = re.sub(r'(\[?\s*🟡\s*\[?\s*IMPORTANT\s*\]?\s*\]?|\[IMPORTANT\])\s*', IMPORTANT_BADGE_HTML, text, flags=re.IGNORECASE)
+    # Replace any variant of [🟢 NIT], 🟢 [NIT], [NIT]
+    text = re.sub(r'(\[?\s*🟢\s*\[?\s*NIT\s*\]?\s*\]?|\[NIT\])\s*', NIT_BADGE_HTML, text, flags=re.IGNORECASE)
+    # Replace any variant of [❓ QUESTION], ❓ [QUESTION], [QUESTION]
+    text = re.sub(r'(\[?\s*❓\s*\[?\s*QUESTION\s*\]?\s*\]?|\[QUESTION\])\s*', QUESTION_BADGE_HTML, text, flags=re.IGNORECASE)
     return text
 
 def format_and_publish_benchmark_review(data: dict, git_provider, main_language: str = "en") -> str:
@@ -743,7 +752,9 @@ def format_and_publish_benchmark_review(data: dict, git_provider, main_language:
         "P3": "https://camo.githubusercontent.com/8df84040dec6ed21e795add369b5db7d9be8580c4cfc47fb9b77c63f509e31f7/687474703a2f2f3231332e3136332e3230322e3134372f6261646765732f70332e737667",
         "Security": "https://camo.githubusercontent.com/65a7bbe5220687b7e3c2340a17370b99c80449bb6bcf8fca0e8a67bd1ce181f5/68747470733a2f2f6772657074696c652d7374617469632d6173736574732e73332e616d617a6f6e6177732e636f6d2f6261646765732f53656375726974792e7376673f763d32",
         "Blocking": BLOCKING_BADGE_URL,
-        "Important": IMPORTANT_BADGE_URL
+        "Important": IMPORTANT_BADGE_URL,
+        "Nit": NIT_BADGE_URL,
+        "Question": QUESTION_BADGE_URL
     }
 
     for idx, issue in enumerate(filtered_issues, 1):
