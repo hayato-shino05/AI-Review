@@ -646,7 +646,13 @@ app.include_router(router)
 
 
 def start():
-    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", "3000")))
+    try:
+        import uvloop  # noqa: F401
+        import httptools  # noqa: F401
+        loop, http = "uvloop", "httptools"
+    except ImportError:
+        loop, http = None, None
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", "3000")), loop=loop, http=http)
 
 
 if __name__ == '__main__':

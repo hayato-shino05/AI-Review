@@ -21,6 +21,10 @@ from pr_agent.algo.token_handler import TokenHandler
 from pr_agent.algo.types import EDIT_TYPE
 from pr_agent.algo.utils import ModelType, get_model
 from pr_agent.config_loader import get_settings, get_verbosity_level
+try:
+    from rust_accel import risk_priority_sort as _rust_risk_priority_sort
+except Exception:
+    _rust_risk_priority_sort = None
 from pr_agent.git_providers.git_provider import GitProvider
 from pr_agent.log import get_logger
 
@@ -924,6 +928,34 @@ def _get_all_deployments(all_models: list[str]) -> list[str]:
     return all_deployments
 
 
+_RISK_KEYWORDS = ("auth", "security", "crypto", "token", "sql", "migration", "api", "route", "handler", "service", "db")
+
+
+def _risk_priority_key(file):
+    """Return (risk_score, filename) for risk-based file ordering.
+
+    Higher risk_score => higher priority. Falls back to a pure-Python keyword
+    match when `rust_accel` is unavailable.
+    """
+    name = getattr(file, "filename", "") or ""
+    name_l = name.lower()
+    score = sum(1 for kw in _RISK_KEYWORDS if kw in name_l)
+    return (score, name)
+
+
+def risk_priority_sort(files):
+    """Sort files so high-risk ones come first, using rust_accel when available.
+
+    Returns a new list sorted by descending risk score then filename ascending.
+    """
+    if _rust_risk_priority_sort is not None:
+        try:
+            return list(_rust_risk_priority_sort(files))
+        except Exception:
+            pass
+    return sorted(files, key=_risk_priority_key, reverse=True)
+
+
 def get_pr_multi_diffs(git_provider: GitProvider,
                        token_handler: TokenHandler,
                        model: str,
@@ -1052,6 +1084,11 @@ def get_pr_multi_diffs(git_provider: GitProvider,
     sorted_files = []
     for lang in pr_languages:
         sorted_files.extend(sorted(lang['files'], key=lambda x: x.tokens, reverse=True))
+
+    # Risk-Priority Ordering for Large PRs: high-risk files first so the initial
+    # chunks (bounded by max_calls) always contain the most important files.
+    if get_settings().pr_reviewer.get("enable_large_pr_chunking", False):
+        sorted_files = risk_priority_sort(sorted_files)
 
     # Build the same transformed file dictionary used by the prepared path, preserving the
     # descending token order established above. The shared packer then owns chunk boundaries,

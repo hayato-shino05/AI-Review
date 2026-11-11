@@ -23,3 +23,7 @@ dist/
 *.swp
 *.swo
 pr-agent.log
+
+# Rust build output and temp test files
+native_rust/target/
+test_*.py

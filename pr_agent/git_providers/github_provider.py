@@ -1,5 +1,10 @@
+import base64
 import binascii
 import copy
+import threading
+import requests
+from concurrent.futures import ThreadPoolExecutor, as_completed
+_thread_local = threading.local()
 import difflib
 import hashlib
 import json
@@ -141,6 +146,7 @@ class GithubProvider(GitProvider):
         self._check_runs_in_progress: set = set()
         self._check_run_base_summaries: dict = {}
         self._check_runs_progress_blocked: set = set()
+        self._diff_files_lock = threading.Lock()
         self._published_inline_comment_bodies: list[str] = []
         if pr_url and 'pull' in pr_url:
             self.set_pr(pr_url)
@@ -465,13 +471,11 @@ class GithubProvider(GitProvider):
                     self.filtered_diff_file_names = context.get("filtered_diff_file_names", [])
                     return diff_files
             except ContextDoesNotExistError:
-                # Skip the per-request cache outside a request cycle; fall through and compute the files.
                 pass
 
             if self.diff_files is not None:
                 return self.diff_files
 
-            # filter files using [ignore] patterns
             files_original = self.get_files()
             files = filter_ignored(files_original)
             if files_original != files:
@@ -482,85 +486,125 @@ class GithubProvider(GitProvider):
                     {"files": names_original,
                      "filtered_files": names_new})
                 except AttributeError:
-                    # Keep logging best-effort: a diff entry without a filename must not stop diff collection.
                     pass
 
-            diff_files = []
-            invalid_files_names = []
-            is_close_to_rate_limit = False
-
-            # Resolve the merge base only when pre-change content is needed.
             merge_base_commit = None
+            merge_base_resolved = False
             repo = self.repo_obj
             pr = self.pr
 
+            is_close_to_rate_limit = False
+
             counter_valid = 0
+            new_fetch_tasks = []
+            orig_fetch_tasks = []
+            file_decision = {}
+            invalid_files_names = []
+
             for file in files:
                 if not is_valid_file(file.filename):
                     invalid_files_names.append(file.filename)
                     continue
 
-                patch = file.patch
+                idx = len(file_decision)
                 is_renamed = file.status == "renamed" and getattr(file, "previous_filename", None)
                 old_filename = file.previous_filename if is_renamed else None
+
+                counter_valid += 1
+                avoid_load = False
+                if counter_valid >= MAX_FILES_ALLOWED_FULL and file.patch and not self.incremental.is_incremental:
+                    avoid_load = True
+                    if counter_valid == MAX_FILES_ALLOWED_FULL:
+                        get_logger().info("Too many files in PR, will avoid loading full content for rest of files")
+
+                pr_level_status = not (self.incremental.is_incremental and self.unreviewed_files_map)
+
+                decision = {
+                    "file": file,
+                    "status": file.status,
+                    "old_filename": old_filename,
+                    "avoid_load": avoid_load,
+                    "need_new": False,
+                    "need_orig": False,
+                    "orig_sha": None,
+                }
+
                 if is_close_to_rate_limit:
-                    new_file_content_str = ""
-                    original_file_content_str = ""
+                    decision["need_new"] = False
+                    decision["need_orig"] = False
+                elif avoid_load or (pr_level_status and file.status == "removed"):
+                    decision["need_new"] = False
                 else:
-                    # allow only a limited number of files to be fully loaded. We can manage the rest with diffs only
-                    counter_valid += 1
-                    avoid_load = False
-                    if counter_valid >= MAX_FILES_ALLOWED_FULL and patch and not self.incremental.is_incremental:
-                        avoid_load = True
-                        if counter_valid == MAX_FILES_ALLOWED_FULL:
-                            get_logger().info("Too many files in PR, will avoid loading full content for rest of files")
+                    decision["need_new"] = True
 
-                    pr_level_status = not (self.incremental.is_incremental and self.unreviewed_files_map)
-                    if avoid_load or (pr_level_status and file.status == "removed"):
-                        new_file_content_str = ""
+                if self.incremental.is_incremental and self.unreviewed_files_map:
+                    decision["need_orig"] = True
+                    decision["orig_sha"] = self.incremental.last_seen_commit_sha
+                else:
+                    if avoid_load or file.status == "added":
+                        decision["need_orig"] = False
                     else:
-                        # communication with GitHub
-                        new_file_content_str = self._get_pr_file_content(file, self.pr.head.sha)
+                        decision["need_orig"] = True
+                        if not merge_base_resolved:
+                            try:
+                                compare = repo.compare(pr.base.sha, pr.head.sha)
+                                merge_base_commit = compare.merge_base_commit
+                            except (GithubException, RequestException) as e:
+                                get_logger().error(f"Failed to get merge base commit: {e}")
+                                merge_base_commit = pr.base
+                            merge_base_resolved = True
+                            if merge_base_commit.sha != pr.base.sha:
+                                get_logger().info(
+                                    f"Using merge base commit {merge_base_commit.sha} instead of base commit ")
+                        decision["orig_sha"] = merge_base_commit.sha if merge_base_commit else pr.base.sha
 
-                    if self.incremental.is_incremental and self.unreviewed_files_map:
-                        original_file_content_str = self._get_pr_file_content(
-                            file, self.incremental.last_seen_commit_sha, path=old_filename)
+                file_decision[idx] = decision
+                if decision["need_new"]:
+                    new_fetch_tasks.append((file, pr.head.sha, None, "new"))
+                if decision["need_orig"]:
+                    orig_fetch_tasks.append((file, decision["orig_sha"], old_filename, "orig"))
+
+            new_contents = self._fetch_file_contents_parallel(new_fetch_tasks)
+            orig_contents = self._fetch_file_contents_parallel(orig_fetch_tasks)
+
+            diff_files = []
+            for idx in range(len(file_decision)):
+                decision = file_decision[idx]
+                file = decision["file"]
+                status = decision["status"]
+                old_filename = decision["old_filename"]
+                avoid_load = decision["avoid_load"]
+
+                new_file_content_str = ""
+                if decision["need_new"]:
+                    new_file_content_str = new_contents.get((file.filename, pr.head.sha, None), "")
+                original_file_content_str = ""
+                if decision["need_orig"]:
+                    original_file_content_str = orig_contents.get((file.filename, decision["orig_sha"], old_filename), "")
+
+                patch = file.patch
+
+                if self.incremental.is_incremental and self.unreviewed_files_map:
+                    patch = load_large_diff(file.filename, new_file_content_str, original_file_content_str)
+                    self.unreviewed_files_map[file.filename] = patch
+                else:
+                    if avoid_load or file.status == "added":
+                        original_file_content_str = ""
+                    if not patch:
                         patch = load_large_diff(file.filename, new_file_content_str, original_file_content_str)
-                        self.unreviewed_files_map[file.filename] = patch
-                    else:
-                        if avoid_load or file.status == "added":
-                            original_file_content_str = ""
-                        else:
-                            if merge_base_commit is None:
-                                # Use the merge base instead of a potentially advanced target branch.
-                                try:
-                                    compare = repo.compare(pr.base.sha, pr.head.sha)
-                                    merge_base_commit = compare.merge_base_commit
-                                except (GithubException, RequestException) as e:
-                                    get_logger().error(f"Failed to get merge base commit: {e}")
-                                    merge_base_commit = pr.base
-                                if merge_base_commit.sha != pr.base.sha:
-                                    get_logger().info(
-                                        f"Using merge base commit {merge_base_commit.sha} instead of base commit ")
-                            original_file_content_str = self._get_pr_file_content(
-                                file, merge_base_commit.sha, path=old_filename)
-                        if not patch:
-                            patch = load_large_diff(file.filename, new_file_content_str, original_file_content_str)
 
-
-                if file.status == 'added':
+                if status == 'added':
                     edit_type = EDIT_TYPE.ADDED
-                elif file.status == 'removed':
+                elif status == 'removed':
                     edit_type = EDIT_TYPE.DELETED
-                elif file.status == 'renamed':
+                elif status == 'renamed':
                     edit_type = EDIT_TYPE.RENAMED
-                elif file.status == 'modified':
+                elif status == 'modified':
                     edit_type = EDIT_TYPE.MODIFIED
                 else:
-                    get_logger().error(f"Unknown edit type: {file.status}")
+                    get_logger().error(f"Unknown edit type: {status}")
                     edit_type = EDIT_TYPE.UNKNOWN
 
-                # count number of lines added and removed
                 if hasattr(file, 'additions') and hasattr(file, 'deletions'):
                     num_plus_lines = file.additions
                     num_minus_lines = file.deletions
@@ -575,6 +619,7 @@ class GithubProvider(GitProvider):
                                                                num_plus_lines=num_plus_lines,
                                                                num_minus_lines=num_minus_lines,)
                 diff_files.append(file_patch_canonical_structure)
+
             if invalid_files_names:
                 get_logger().info(f"Filtered out files with invalid extensions: {invalid_files_names}")
 
@@ -584,7 +629,6 @@ class GithubProvider(GitProvider):
                 context["diff_files"] = diff_files
                 context["filtered_diff_file_names"] = invalid_files_names
             except ContextDoesNotExistError:
-                # Skip caching outside a request cycle; the value is already on self.
                 pass
 
             return diff_files
@@ -595,11 +639,9 @@ class GithubProvider(GitProvider):
             get_logger().error(f"Failing to get diff files: {e}",
                                artifact={"traceback": traceback.format_exc()})
             if isinstance(e, GithubException) and _is_permanent_github_error(e):
-                # Skip outer retries for permanent client errors.
                 raise
             raise RateLimitExceeded("Retryable GitHub API failure while collecting diff files.") from e
         except Exception as e:
-            # Preserve traceback logging while avoiding retries for programming errors.
             get_logger().error(f"Failing to get diff files: {e}",
                                artifact={"traceback": traceback.format_exc()})
             raise
@@ -2081,16 +2123,119 @@ class GithubProvider(GitProvider):
 
     def _get_pr_file_content(self, file: FilePatchInfo, sha: str, path: str = None) -> str:
         file_path = path or file.filename
+        lock = self._diff_files_lock
         cache = getattr(self, "_revision_file_contents", None)
         if cache is None:
-            cache = self._revision_file_contents = {}
+            with lock:
+                cache = getattr(self, "_revision_file_contents", None)
+                if cache is None:
+                    cache = self._revision_file_contents = {}
         key = (self.repo, sha, file_path)
-        if key in cache:
-            return cache[key]
+        with lock:
+            if key in cache:
+                return cache[key]
         content = self.get_pr_file_content(file_path, sha)
         if content:
-            cache[key] = content
+            with lock:
+                cache[key] = content
         return content
+
+    def _get_file_content_direct(self, file_path: str, sha: str) -> str:
+        """Fetch one file's decoded content via a thread-local requests.Session.
+
+        Shares the provider's installation token but never touches PyGithub's
+        shared requests.Session concurrently. Mirrors get_pr_file_content's error
+        handling: 404 -> "", network/decode errors -> "".
+        """
+        lock = self._diff_files_lock
+        cache = getattr(self, "_revision_file_contents", None)
+        if cache is None:
+            with lock:
+                cache = getattr(self, "_revision_file_contents", None)
+                if cache is None:
+                    cache = self._revision_file_contents = {}
+        key = (self.repo, sha, file_path)
+        with lock:
+            if key in cache:
+                return cache[key]
+        try:
+            session = getattr(_thread_local, "session", None)
+            if session is None:
+                session = requests.Session()
+                _thread_local.session = session
+            token = self.github_client.auth.token
+            url = f"{self.base_url}/repos/{self.repo}/contents/{quote(file_path, safe='')}?ref={sha}"
+            resp = session.get(url, headers={"Authorization": f"Bearer {token}"}, timeout=30)
+            if resp.status_code == 404:
+                return ""
+            resp.raise_for_status()
+            data = resp.json()
+            content_b64 = data.get("content", "")
+            decoded = base64.b64decode(content_b64).decode()
+        except (RequestException, UnicodeDecodeError, binascii.Error,
+                AssertionError, AttributeError, ValueError):
+            return ""
+        if decoded:
+            with lock:
+                cache[key] = decoded
+        return decoded
+
+    def _fetch_file_contents_parallel(self, tasks, max_workers: int = 8) -> dict:
+        """
+        Fetch GitHub file contents in parallel using a thread pool.
+
+        Each task is a (file, sha, path, kind) tuple. Returns a dict mapping the
+        task tuple to the fetched content string (empty string on failure). Uses a
+        thread-safe revision cache so concurrent workers do not duplicate API
+        calls for the same (repo, sha, path). Each worker fetches via a
+        thread-local requests.Session using the provider's installation token, so
+        PyGithub's shared session is never touched concurrently.
+        """
+        results: dict = {}
+        if not tasks:
+            return results
+
+        lock = self._diff_files_lock
+
+        def fetch_one(file, sha, path, kind):
+            file_path = path or file.filename
+            cache = getattr(self, "_revision_file_contents", None)
+            if cache is None:
+                with lock:
+                    cache = getattr(self, "_revision_file_contents", None)
+                    if cache is None:
+                        cache = self._revision_file_contents = {}
+            key = (self.repo, sha, file_path)
+            with lock:
+                if key in cache:
+                    return cache[key]
+            try:
+                content = self._get_file_content_direct(file_path, sha)
+            except Exception as e:
+                get_logger().warning(
+                    f"Failed to fetch file content for {file_path} at {sha}: {e}"
+                )
+                content = ""
+            if content:
+                with lock:
+                    cache[key] = content
+            return content
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_task = {
+                executor.submit(fetch_one, file, sha, path, kind): (file, sha, path, kind)
+                for file, sha, path, kind in tasks
+            }
+            for future in as_completed(future_to_task):
+                file, sha, path, kind = future_to_task[future]
+                try:
+                    results[(file.filename, sha, path)] = future.result()
+                except Exception as e:
+                    get_logger().warning(
+                        f"Failed to fetch file content for {path or file.filename} at {sha}: {e}"
+                    )
+                    results[(file.filename, sha, path)] = ""
+        return results
 
     def publish_labels(self, pr_types):
         try:

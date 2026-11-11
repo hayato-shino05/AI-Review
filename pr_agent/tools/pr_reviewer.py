@@ -1086,7 +1086,10 @@ class PRReviewer:
             completed=len(patches_diff_list) - len(pending_indices),
         )
         predictions = await asyncio.gather(
-            *[self._review_chunk(model, prompt) for prompt in prompts],
+            *[
+                self._review_chunk(model, prompt, chunk_index=index)
+                for index, prompt in zip(pending_indices, prompts)
+            ],
             return_exceptions=True)
 
         chunk_errors = []
@@ -1227,11 +1230,23 @@ class PRReviewer:
                 record_model_used(model, is_fallback=model != self._chunked_primary_model)
         return True
 
-    async def _review_chunk(self, model: str, prompt: str) -> str:
-        """Review one chunk, then advance the in-place progress comment it runs under."""
+    async def _review_chunk(self, model: str, prompt: str, chunk_index: int = 0) -> str:
+        """Review one chunk, then advance the in-place progress comment it runs under.
+
+        Chunk index >= 1 trong PR lớn chỉ giữ phần core tóm tắt đầu (~1200 chars)
+        của skills_context nếu nó quá dài (> 1500 chars) để giảm input token;
+        chunk 0 được giữ toàn bộ skills_context để đảm bảo chất lượng review đầu tiên.
+        """
+        old_skills = None
         try:
+            skills_context = self.vars.get("skills_context", "")
+            if chunk_index >= 1 and isinstance(skills_context, str) and len(skills_context) > 1500:
+                old_skills = skills_context
+                self.vars["skills_context"] = skills_context[:1200]
             return await self._get_prediction(model, prompt)
         finally:
+            if old_skills is not None:
+                self.vars["skills_context"] = old_skills
             progress = getattr(self, "_chunk_progress", None)
             if progress is not None:
                 await progress.record_settled()
@@ -1277,48 +1292,149 @@ class PRReviewer:
     def repair_yaml_string(yaml_str: str) -> str:
         """Tiền xử lý và sửa các lỗi cú pháp YAML phổ biến do LLM sinh ra trước khi parse.
 
-        Xử lý: bo các dòng phân cách tài liệu '---'/'...'; bo ngoặc kép cho giá trị chứa
-        dấu hai chấm không nháy (url: http://host:8080), dấu '#' bị hiểu nhầm là nhận xét,
-        hoặc danh sách gạch ngang (JIRA-123 - JIRA-456); giữ nguyên thụt dang của từng dòng.
+        Xử lý 8 trường hợp lỗi phổ biến:
+          1. Giá trị chứa hai chấm không nháy (url, ``Error: state: fail``).
+          2. Ký tự ``#`` trong giá trị không bọc quote.
+          3. Danh sách gạch ngang ``- `` sai lề hoặc thiếu khoảng trắng.
+          4. Khung fenced markdown (`` ```yaml ``) kèm văn bản dẫn trước/sau.
+          5. Dòng phân cách tài liệu ``---`` hoặc ``...``.
+          6. Nháy đơn/kép lồng nhau bị vỡ (``O'Brien's data``).
+          7. Văn bản multiline không thụt lề ngay sau ``issue_content:`` /
+             ``security_concerns:``.
+          8. Văn bản trailing giải thích sau khối YAML.
+
+        Idempotent: YAML hợp lệ chuẩn (nhiều ``key_issues_to_review``, block
+        scalar ``|``) đi qua hàm này vẫn parse ra kết quả giống hệt 100%.
         """
         if not yaml_str:
             return yaml_str
-        lines = yaml_str.split("\n")
+
+        text = yaml_str.strip()
+
+        # 4 & 8: tách khối YAML khỏi preamble / trailing text / fenced code block.
+        fence = re.search(r"```(?:yaml|yml)?\s*\n(.*?)\n```", text, re.DOTALL | re.IGNORECASE)
+        if fence:
+            text = fence.group(1).strip()
+        else:
+            # Lấy đoạn từ dòng 'key:' đầu tiên đến trước dòng văn bản giải thích sau khối.
+            lines = text.split("\n")
+            start_idx = None
+            for i, line in enumerate(lines):
+                stripped = line.strip()
+                if stripped in ("---", "..."):
+                    continue
+                if re.match(r"^[A-Za-z_][A-Za-z0-9_]*\s*:", stripped):
+                    start_idx = i
+                    break
+            if start_idx is not None:
+                lines = lines[start_idx:]
+                # Cắt tại dòng văn bản trailing (không chứa ':' và không phải key hợp lệ).
+                cut = len(lines)
+                for j in range(1, len(lines)):
+                    st = lines[j].strip()
+                    if st and not lines[j].startswith(" ") and not lines[j].startswith("\t") and not lines[j].startswith("- ") and ":" not in st:
+                        cut = j
+                        break
+                text = "\n".join(lines[:cut])
+
+        lines = text.split("\n")
         fixed: list[str] = []
-        for line in lines:
+        block_key = None  # key đang mở block scalar '|' cần thụt lề các dòng nội dung
+
+        for raw in lines:
+            line = raw.rstrip()
             stripped = line.strip()
+
+            # Bo dòng trống giữ nguyên.
             if not stripped:
                 fixed.append(line)
                 continue
-            # Bỏ dòng phân cách tài liệu YAML ('---', '...') do LLM thường thêm vào đầu/cuối.
+
+            # 5: Bo dòng phân cách tài liệu.
             if stripped in ("---", "..."):
                 continue
-            indent = line[: len(line) - len(line.lstrip())]
-            # Bỏ qua các khối literal scalar '|'/'|2' đã được xử lý riêng ở nơi khác.
-            if stripped.startswith("|") or stripped.startswith(">"):
+
+            indent = line[: len(line) - line.lstrip().__len__()] if False else line[: len(line) - len(line.lstrip())]
+
+            # Bỏ qua block scalar header '|'/'|2'/' >' (giữ nguyên, thiết lập block_key).
+            m_scalar = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)\s*:\s*\|[0-9]*\s*$", stripped)
+            if m_scalar:
                 fixed.append(line)
+                block_key = m_scalar.group(1)
                 continue
+
+            # Nếu đang trong block scalar: thụt lề nội dung multiline (trường hợp 7).
+            if block_key is not None:
+                if stripped == "" or line.startswith(" ") or line.startswith("\t"):
+                    fixed.append(line)
+                    continue
+                # Dòng mới không thụt lề và là key mới -> ket thuc block scalar.
+                block_key = None
+
+            # 1 & 2 & 3: phan tich key:value.
             if ":" not in stripped:
+                # Dang la list item '- ...' (trường hợp 3).
+                if stripped.startswith("- "):
+                    # Bo dau '- ' va xu ly gia tri sau nhu mot value.
+                    val = stripped[2:].strip()
+                    fixed.append(f'{indent}- "{val}"')
+                else:
+                    fixed.append(line)
+                continue
+
+            key, _, val = stripped.partition(":")
+            key = key.strip()
+            val = val.strip()
+
+            # Neu value rong (key duy nhat, co the mo block sau) -> giong nguyen.
+            if val == "":
                 fixed.append(line)
                 continue
-            key, _, val = stripped.partition(":")
-            val = val.strip()
-            need_quote = bool(val) and not (
-                val.startswith('"') or val.startswith("'") or val.startswith("[") or val.startswith("{")
-            )
-            # Dấu hai chấm không nháy trong giá trị (http://host:8080)
+
+            # Neu value da co ngoac kep/don, ngoac vuong/nhon day -> gi nguyen (idempotent).
+            # Luu y: nhay don bat dau/ket thuc nhung co nhay don trong noi dung (O'Brien's)
+            # khong la gia tri da bọc hop le -> phai chuyen sang ngoac kep va escape.
+            is_wrapped = False
+            if (val.startswith('"') and val.endswith('"') and '"' not in val[1:-1]) or \
+               (val.startswith("'") and val.endswith("'") and "'" not in val[1:-1]):
+                is_wrapped = True
+            if is_wrapped or val.startswith("[") or val.startswith("{"):
+                fixed.append(f"{indent}{key}: {val}")
+                continue
+
+            # Xoa ngoac kep/don don le o dau/cuoi (tranh lua chong).
+            if (val.startswith('"') != val.endswith('"')) or (val.startswith("'") != val.endswith("'")):
+                val = val.strip('"').strip("'")
+
+            need_quote = False
+
+            # 1: dau hai cham khong nhaya trong value (url, 'Error: state: fail').
             if ":" in val:
                 need_quote = True
-            # Dấu '#' giữa/cuối giá trị bị hiểu nhầm là nhận xét
-            if "#" in val and not val.lstrip().startswith("#"):
+
+            # 2: ky tu '#' giua/cuoi value.
+            if "#" in val:
                 need_quote = True
-            # Giá trị trông như danh sách gạch ngang do LLM nhầm
+
+            # 3: danh sach gach ngang trong value.
             if re.search(r"(^|\s)-\s+\S", val):
                 need_quote = True
+
+            # 6: nháy đơn/kép lồng nhau trong value (O'Brien's data) -> escape boi ngoac kep.
+            if val.count("'") > 1 or val.count('"') > 1:
+                need_quote = True
+                val = val.replace("\\", "\\\\").replace('"', '\\"')
+
+            # 6: nhay don/kep lon nhau trong value (O'Brien's data) -> escape boi ngoac kep.
+            if ("'" in val) or ('"' in val):
+                need_quote = True
+                val = val.replace("\\", "\\\\").replace('"', '\\"')
+
             if need_quote:
                 fixed.append(f'{indent}{key}: "{val}"')
-                continue
-            fixed.append(line)
+            else:
+                fixed.append(f"{indent}{key}: {val}")
+
         return "\n".join(fixed)
 
     @staticmethod
