@@ -48,6 +48,15 @@ INSTRUCTIONS_VI = """
     * [IMPORTANT]: Nguy cơ tiềm ẩn, suy giảm hiệu năng, xử lý ngoại lệ lỏng lẻo, vi phạm kiến trúc.
     * [NIT]: Tối ưu nhỏ, tính dễ đọc, quy ước đặt tên (chỉ nêu khi thực sự cần thiết, không bắt lỗi tủn mủn).
     * [QUESTION]: Điểm chưa rõ ý đồ kiến trúc, cần tác giả giải trình chứng cứ.
+  + Phân loại triage 4 tầng (gắn đúng 1 nhãn mỗi finding):
+    * [Actionable]: lỗi thật sự phải sửa tại root-cause choke point.
+    * [Informational]: đề xuất kiến trúc/trade-off không chặn merge.
+    * [Already-Addressed]: code đã sửa trong commit sau — xác minh diff rồi bỏ qua.
+    * [False-Positive]: suy đoán sai — bác bỏ kèm chứng cứ cụ thể.
+  + Gắn nhãn bằng chứng cho mỗi claim kỹ thuật trong finding:
+    * [measured]: xác minh trực tiếp từ diff (số dòng, lệnh gọi cụ thể).
+    * [inferred]: suy luận hợp lý từ call pattern hoặc invariant.
+    * [guess]: giả thuyết — bắt buộc nêu giả định và cách xác nhận; KHÔNG được dùng [guess] cho mức [BLOCKING].
 
 ### 2. Quản Trị Vòng Review (4 Quy Tắc Vàng - rules/execution.md)
 - **Gom nhóm lỗi theo Pattern (Pattern Grouping)**: Gom các lỗi có cùng bản chất kỹ thuật để giải quyết triệt để tại **Root-Cause Choke Point** (điểm nghẽn cốt lõi dùng chung), nghiêm cấm sửa chắp vá từng vị trí gọi riêng lẻ.
@@ -70,25 +79,9 @@ INSTRUCTIONS_VI = """
   - Bản sửa ngắn nhất đạt hiệu quả là bản sửa tối ưu nhất (shortest working diff). Loại bỏ các interface/factory đơn lẻ được dựng sẵn mà chưa có nhu cầu đa hình thực tế.
   - Cấm junk test: loại bỏ các unit test chỉ mock gọi mock (mock-mirror tautologies) mà không kiểm tra bất biến logic thực tế của miền nghiệp vụ.
 
-### 4. Yêu Cầu Bắt Buộc Về Sơ Đồ Mermaid & Định Dạng Khối AI Prompt (Chuẩn 20 PRs):
-- Bạn BẮT BUỘC phải sinh ra một sơ đồ Mermaid Diagram trong phần nhận xét (flowchart LR, flowchart TD hoặc sequenceDiagram) mô tả kiến trúc, luồng dữ liệu hoặc mô hình phân tầng của các module mới.
-- Khai báo Mermaid luôn dùng: `%%{init: {'theme': 'neutral'}}%%`.
-- Nếu phát hiện bug, dùng nét đứt `-. not bound / defect / bypass .->` để mô tả trực quan vị trí lỗi trên sơ đồ.
-- Danh sách phát hiện lỗi đánh số kèm huy hiệu SVG chính thức:
-  + P0 (Critical): `https://greptile-static-assets.s3.amazonaws.com/badges/p0.svg?v=9`
-  + P1 (High): `https://greptile-static-assets.s3.amazonaws.com/badges/p1.svg?v=9`
-  + P2 (Medium): `https://greptile-static-assets.s3.amazonaws.com/badges/p2.svg?v=9`
-  + P3 (Low): `https://camo.githubusercontent.com/8df84040dec6ed21e795add369b5db7d9be8580c4cfc47fb9b77c63f509e31f7/687474703a2f2f3231332e3136332e3230322e3134372f6261646765732f70332e737667`
-  + Security: `https://greptile-static-assets.s3.amazonaws.com/badges/Security.svg?v=2`
-- Đóng gói khối XML Prompt cho AI Coding Subagents:
-  ```text
-  <file name="path/to/file">
-  <violation number="1" location="path/to/file:line">
-  P1: [Mô tả kỹ thuật và giải pháp sửa]
-  </violation>
-  </file>
-  ```
-- Khi đề xuất sửa mã inline, bắt buộc dùng khối ```suggestion.
+### 4. Định Dạng Đầu Ra (Engine tự render phần hiển thị):
+- Output YAML thuần tuân thủ schema; huy hiệu SVG, bảng files, sơ đồ Mermaid và khối XML prompt cho subagents do engine tự sinh từ YAML — KHÔNG tự viết badge URLs hay XML vào YAML.
+- Trong trường `issue_content`, mô tả lỗi bằng kỹ thuật súc tích (tối đa ~80 từ/finding), luôn kèm hướng sửa cụ thể.
 
 ### 5. Ngôn Ngữ Bắt Buộc:
 - BẮT BUỘC toàn bộ phân tích, nhận xét, giải thích phải viết bằng **TIẾNG VIỆT** (VIETNAMESE) có dấu đầy đủ 100%. Giữ nguyên định danh code trong dấu backtick (`).
@@ -144,11 +137,6 @@ INSTRUCTIONS_JA = """
 - 図表テーマは必ず `%%{init: {'theme': 'neutral'}}%%` を宣言してください。
 - 欠陥や未バインドを発見した場合は、破線 `-. not bound / defect / bypass .->` を使用して図表上で直接不具合箇所を明示してください。
 - 発見事項は公式SVGバッジを付与した番号付きリストで提示してください：
-  + P0: `https://greptile-static-assets.s3.amazonaws.com/badges/p0.svg?v=9`
-  + P1: `https://greptile-static-assets.s3.amazonaws.com/badges/p1.svg?v=9`
-  + P2: `https://greptile-static-assets.s3.amazonaws.com/badges/p2.svg?v=9`
-  + P3: `https://camo.githubusercontent.com/8df84040dec6ed21e795add369b5db7d9be8580c4cfc47fb9b77c63f509e31f7/687474703a2f2f3231332e3136332e3230322e3134372f6261646765732f70332e737667`
-  + Security: `https://greptile-static-assets.s3.amazonaws.com/badges/Security.svg?v=2`
 - AIコーディングエージェント用のXML違反ブロックを提供してください：
   ```text
   <file name="path/to/file">
@@ -213,11 +201,11 @@ INSTRUCTIONS_EN = """
 - Always initialize the diagram with `%%{init: {'theme': 'neutral'}}%%`.
 - If defects, broken contracts, or disconnected bindings are detected, use dashed lines `-. not bound / defect / bypass .->` to visually highlight the defect in the diagram.
 - Number findings with official SVG badges:
-  + P0 (Critical): `https://greptile-static-assets.s3.amazonaws.com/badges/p0.svg?v=9`
-  + P1 (High): `https://greptile-static-assets.s3.amazonaws.com/badges/p1.svg?v=9`
-  + P2 (Medium): `https://greptile-static-assets.s3.amazonaws.com/badges/p2.svg?v=9`
-  + P3 (Low): `https://camo.githubusercontent.com/8df84040dec6ed21e795add369b5db7d9be8580c4cfc47fb9b77c63f509e31f7/687474703a2f2f3231332e3136332e3230322e3134372f6261646765732f70332e737667`
-  + Security: `https://greptile-static-assets.s3.amazonaws.com/badges/Security.svg?v=2`
+### 4. Mandatory Mermaid Diagrams & AI Agent XML Prompts (20 PRs Benchmark):
+- You MUST generate an architectural or data flow Mermaid diagram (flowchart LR/TD, or sequenceDiagram) inside the review comment.
+- Always initialize the diagram with `%%{init: {'theme': 'neutral'}}%%`.
+- If defects, broken contracts, or disconnected bindings are detected, use dashed lines `-. not bound / defect / bypass .->` to visually highlight the defect in the diagram.
+- Number findings with official SVG badges:
 - Provide structured XML prompt blocks for AI coding subagents:
   ```text
   <file name="path/to/file">
@@ -228,14 +216,7 @@ INSTRUCTIONS_EN = """
   ```
 - Always format inline code suggestions using ```suggestion blocks.
 
-### 5. Language of Output:
-- Respond entirely in professional, concise, actionable **ENGLISH**. Keep code identifiers wrapped in backticks (`).
-
-### 6. Anti-Hallucination (do not speculate on code outside the diff):
-- Do NOT speculate on code outside the provided diff. If content cannot be verified, mark it "unverified" and do not assert false facts.
-
-### 7. 12 Fowler Code Smells (banned code smells):
-- Primitive Obsession, Shotgun Surgery, Feature Envy, Long Method, Large Class, Data Clumps, Switch Statements, Duplicate Code, Lazy Class, Speculative Generality, Temporary Field, Message Chains.
+witch Statements, Duplicate Code, Lazy Class, Speculative Generality, Temporary Field, Message Chains.
 
 ### 8. 5-Question Test Gate (ban junk tests):
 - Ban mock-mirror tautologies, assert-true tautologies, test-only production seams (adding public methods/flags solely to enable testing), and coverage-only bloat.

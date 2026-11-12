@@ -54,7 +54,7 @@ _FRONTMATTER_DELIMITER = "---"
 _DEFAULT_MAX_SKILLS_TOKENS = 8000
 # Subdirectories whose contents are intentionally excluded from inlining,
 # matching the agent-skills standard's executable/binary conventions.
-_EXCLUDED_RESOURCE_DIRS = frozenset({"scripts", "assets"})
+_EXCLUDED_RESOURCE_DIRS = frozenset({"scripts", "assets", "advanced"})
 _CONTEXT_CACHE_KEY = "skills_context"
 _CONTEXT_CACHE_SETTINGS_KEY = "skills_context_settings"
 # Per-resource-file size cap. Defence-in-depth against pathological skill
