@@ -8,21 +8,70 @@ from typing import List, Optional
 
 import tomllib  # Python 3.11+
 
-SECRETS_PATH = "/opt/devbox/opt/AI-Review/.secrets.toml"
+SECRETS_PATH = "/opt/AI-Review/.secrets.toml"
+if not os.path.exists(SECRETS_PATH):
+    SECRETS_PATH = "/opt/devbox/opt/AI-Review/.secrets.toml"
 REPO = "hayato-shino05/AI-Review"
 DEFAULT_LABELS = ["quality-alert", "bug", "automated-eval"]
 
 
+def _load_app_token() -> Optional[str]:
+    """Create an installation access token via the GitHub App credentials in .secrets.toml."""
+    try:
+        with open(SECRETS_PATH, "rb") as fh:
+            data = tomllib.load(fh)
+        gh = data.get("github", {})
+        app_id = gh.get("app_id")
+        private_key = gh.get("private_key")
+        if not app_id or not private_key:
+            return None
+        import time as _time
+        import jwt
+        import requests as _requests
+
+        now = int(_time.time())
+        payload = {"iat": now - 60, "exp": now + 540, "iss": str(app_id)}
+        encoded = jwt.encode(payload, private_key, algorithm="RS256")
+        headers = {
+            "Authorization": f"Bearer {encoded}",
+            "Accept": "application/vnd.github+json",
+        }
+        inst_id = gh.get("installation_id")
+        if not inst_id:
+            resp = _requests.get(
+                "https://api.github.com/app/installations",
+                headers=headers, timeout=30,
+            )
+            installations = resp.json() if resp.status_code == 200 else []
+            inst_id = next((i.get("id") for i in installations), None)
+        if not inst_id:
+            return None
+        tok_resp = _requests.post(
+            f"https://api.github.com/app/installations/{inst_id}/access_tokens",
+            headers=headers, timeout=30,
+        )
+        if tok_resp.status_code == 201:
+            return tok_resp.json().get("token")
+        return None
+    except Exception:  # noqa: BLE001 - fall through to env PAT / gh CLI
+        return None
+
+
 def _load_token() -> Optional[str]:
-    """Đọc GitHub token từ .secrets.toml (user_token / app_token) hoặc env PAT."""
+    """Doc GitHub token: GitHub App JWT -> env PAT -> .secrets.toml user_token."""
     env_token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_PAT")
     if env_token:
         return env_token
+    app_token = _load_app_token()
+    if app_token:
+        return app_token
     try:
         with open(SECRETS_PATH, "rb") as fh:
             data = tomllib.load(fh)
         return data.get("user_token") or data.get("app_token")
     except FileNotFoundError:
+        return None
+    except Exception:  # noqa: BLE001 - .secrets.toml hong thi bo qua, dung gh CLI
         return None
     except Exception:  # noqa: BLE001 - .secrets.toml hỏng thì bỏ qua, dùng gh CLI
         return None

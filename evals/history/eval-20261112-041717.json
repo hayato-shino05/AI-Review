@@ -1,0 +1,76 @@
+{
+  "run_at": "2026-11-12T04:17:17.810134+00:00",
+  "total_cases": 4,
+  "total_duration_seconds": 42.303,
+  "recall_rate": 1.0,
+  "caught_p1": 3,
+  "total_p1": 3,
+  "false_positives": 1,
+  "average_judge_score": 3.75,
+  "violations": [
+    "False positives 1 > 0",
+    "Điểm trung bình 3.75 < 3.8"
+  ],
+  "results": [
+    {
+      "case_id": "CPP-CONCURRENCY-01",
+      "severity": "P1",
+      "verdict": "PASS",
+      "overall": 5.0,
+      "scores": {
+        "accuracy": 5.0,
+        "actionability": 5.0,
+        "hallucination_penalty": 5.0,
+        "overall": 5.0,
+        "verdict": "PASS",
+        "reason": "Bot đã nắm bắt chính xác cả hai lỗi P1 (data race đọc m_state không khóa và TOCTOU trong vote_for), đưa ra bản sửa cụ thể bằng lock_guard, không bịa lỗi nào ngoài diff."
+      },
+      "duration_seconds": 10.307
+    },
+    {
+      "case_id": "RUST-STATE-01",
+      "severity": "P1",
+      "verdict": "PASS",
+      "overall": 5.0,
+      "scores": {
+        "accuracy": 5.0,
+        "actionability": 5.0,
+        "hallucination_penalty": 5.0,
+        "overall": 5.0,
+        "verdict": "PASS",
+        "reason": "Bot xác định chính xác lỗi P1 (thiếu kiểm tra committed) trong apply_entry(), cung cấp diff sửa cụ thể và không bịa đặt lỗi ngoài diff."
+      },
+      "duration_seconds": 16.217
+    },
+    {
+      "case_id": "PY-TIMEOUT-01",
+      "severity": "P1",
+      "verdict": "PASS",
+      "overall": 5.0,
+      "scores": {
+        "accuracy": 5.0,
+        "actionability": 5.0,
+        "hallucination_penalty": 5.0,
+        "overall": 5.0,
+        "verdict": "PASS",
+        "reason": "Bot xác định chính xác lỗi P1/P2 (unhandled exception socket.timeout/URLError) và cung cấp diff sửa cụ thể, an toàn, có thể áp dụng ngay, không bịa lỗi ngoài ground truth."
+      },
+      "duration_seconds": 10.77
+    },
+    {
+      "case_id": "CLEAN-CODE-01",
+      "severity": "none",
+      "verdict": "FAIL",
+      "overall": 0.0,
+      "scores": {
+        "accuracy": 0.0,
+        "actionability": 0.0,
+        "hallucination_penalty": 0.0,
+        "overall": 0.0,
+        "verdict": "FAIL",
+        "reason": "Bot báo sai lỗi trên code sạch (False Positive), vi phạm Quy tắc 2; không có căn cứ kỹ thuật và không hướng dẫn sửa thực tế."
+      },
+      "duration_seconds": 5.009
+    }
+  ]
+}

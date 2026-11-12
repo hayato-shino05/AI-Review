@@ -37,7 +37,7 @@ def _load_cases() -> list[dict]:
         return json.load(fh)["cases"]
 
 
-def _simulate_review(diff: str) -> str:
+def _simulate_review(diff: str, severity: str = "P1") -> str:
     """Giả lập output review bot (thay bằng review_module khi có)."""
     if REVIEW_MODULE_PATH.exists():
         import importlib.util
@@ -46,8 +46,15 @@ def _simulate_review(diff: str) -> str:
         module = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
         spec.loader.exec_module(module)  # type: ignore[union-attr]
         return module.review(diff)  # type: ignore[attr-defined]
-    # Giả lập đơn giản: bot phát hiện đúng ground truth (để kiểm tra pipeline).
-    return f"Phát hiện vấn đề theo diff:\n{diff}\nKết luận: có lỗi cần sửa."
+    # Placeholder phải khớp kỳ vọng của từng loại case, nếu không Judge
+    # sẽ phạt false positive trên case sạch một cách giả tạo.
+    if severity == "none":
+        return (
+            "Không phát hiện lỗi blocking hoặc quan trọng nào. "
+            "Mã nguồn tuân thủ tốt type hint, xử lý biên an toàn, "
+            "không có vấn đề bảo mật hay hiệu năng cần lưu ý."
+        )
+    return f"Phát hiện vấn đề theo diff: {diff} - Kết luận: có lỗi cần sửa."
 
 
 def run_all(dry_run: bool = False) -> dict:
@@ -62,7 +69,7 @@ def run_all(dry_run: bool = False) -> dict:
 
     for case in cases:
         case_start = time.perf_counter()
-        review_output = _simulate_review(case["diff"])
+        review_output = _simulate_review(case["diff"], case.get("severity", "P1"))
         try:
             scores = judge(case["ground_truth"], review_output)
             verdict = scores.get("verdict", "FAIL")

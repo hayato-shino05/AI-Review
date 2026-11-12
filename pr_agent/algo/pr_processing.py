@@ -16,6 +16,15 @@ from pr_agent.algo.git_patch_processing import (
 from pr_agent.algo.language_handler import AUTO_GENERATED_FILES_EXACT, sort_files_by_main_languages
 from pr_agent.algo.model_routing import route_primary_model
 from pr_agent.algo.run_details import record_model_used
+
+try:
+    from pr_agent.algo.rust_accel import circuit_check, circuit_report
+except Exception:  # circuit breaker is optional acceleration
+    def circuit_check(_model):
+        return True
+
+    def circuit_report(_model, _kind):
+        return False
 from pr_agent.algo.token_budget import AttemptTokenBudget, FallbackEligibleError, clip_tokens
 from pr_agent.algo.token_handler import TokenHandler
 from pr_agent.algo.types import EDIT_TYPE
@@ -865,9 +874,33 @@ async def retry_with_fallback_models(f: Callable, model_type: ModelType = ModelT
     original_deployment_id = get_settings().get("openai.deployment_id", None)
     context_token = _effective_fallback_chain.set(effective_chain)
     attempt_errors = []
+    skipped_models = []
     try:
         # try each (model, deployment_id) pair until one is successful, otherwise raise exception
         for i, (model, deployment_id) in enumerate(effective_chain):
+            # Smart Router circuit breaker: skip models whose breaker is open
+            # (recent 429/timeout/empty/auth failure), fail over instantly.
+            if not circuit_check(model):
+                get_logger().info(
+                    f"Circuit open for {model}, skipping to next fallback instantly"
+                )
+                skipped_models.append(model)
+                attempt_errors.append(f"{model}: circuit open (skipped)")
+                if i == len(effective_chain) - 1:
+                    if len(skipped_models) == len(effective_chain):
+                        # All models cooling down: force-probe the first one
+                        # rather than failing the whole command.
+                        get_logger().warning(
+                            "All models have open circuits; force-probing the primary"
+                        )
+                        model, deployment_id = effective_chain[0]
+                    else:
+                        raise Exception(
+                            f"Failed to generate prediction with any model of {[model for model, _ in effective_chain]}. "
+                            f"Attempts: {'; '.join(attempt_errors)}"
+                        )
+                else:
+                    continue
             try:
                 get_logger().debug(
                     f"Generating prediction with {model}"
@@ -878,9 +911,11 @@ async def retry_with_fallback_models(f: Callable, model_type: ModelType = ModelT
             except Exception as e:
                 if not isinstance(e, (openai.APIError, asyncio.TimeoutError, FallbackEligibleError)):
                     raise
+                error_kind = _classify_model_error(e)
+                circuit_report(model, error_kind)
                 attempt_errors.append(f"{model}: {type(e).__name__}: {e}")
                 get_logger().warning(
-                    f"Failed to generate prediction with {model}",
+                    f"Failed to generate prediction with {model} (circuit kind={error_kind})",
                     artifact={"error": e},
                 )
                 if i == len(effective_chain) - 1:  # If it's the last iteration
@@ -889,11 +924,29 @@ async def retry_with_fallback_models(f: Callable, model_type: ModelType = ModelT
                         f"Attempts: {'; '.join(attempt_errors)}"
                     ) from e
             else:
+                circuit_report(model, "ok")
                 record_model_used(model, is_fallback=i > 0)
                 return result
     finally:
         _effective_fallback_chain.reset(context_token)
         get_settings().set("openai.deployment_id", original_deployment_id)
+
+
+def _classify_model_error(exc: BaseException) -> str:
+    """Map an LLM failure to a circuit-breaker kind for cooldown selection."""
+    name = type(exc).__name__
+    text = str(exc).lower()
+    if isinstance(exc, openai.RateLimitError) or "rate limit" in text or "429" in text:
+        return "rate_limit"
+    if "serviceunavailable" in name.lower() or "503" in text:
+        return "rate_limit"
+    if isinstance(exc, openai.AuthenticationError) or "api key" in text or "401" in text:
+        return "auth"
+    if isinstance(exc, (openai.APITimeoutError, asyncio.TimeoutError)) or "timed out" in text:
+        return "timeout"
+    if "empty" in text or "no content" in text:
+        return "empty"
+    return "server"
 
 
 def _get_all_models(model_type: ModelType = ModelType.REGULAR) -> list[str]:

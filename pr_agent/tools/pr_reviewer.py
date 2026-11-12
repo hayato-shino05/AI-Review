@@ -1377,11 +1377,17 @@ class PRReviewer:
     @staticmethod
     def _load_review_yaml(prediction: str) -> dict:
         repaired = PRReviewer.repair_yaml_string(prediction.strip())
-        return load_yaml(repaired,
+        data = load_yaml(repaired,
                          keys_fix_yaml=["ticket_compliance_check", "estimated_effort_to_review_[1-5]:", "risk_level:",
                                         "merge_recommendation:", "security_concerns:", "key_issues_to_review:",
                                         "relevant_file:", "relevant_line:", "suggestion:"],
                         first_key='review', last_key='security_concerns')
+        # Models occasionally omit security_concerns entirely; a None here fails
+        # schema validation downstream, so normalize it to the explicit "No".
+        if isinstance(data, dict) and isinstance(data.get("review"), dict):
+            if data["review"].get("security_concerns") is None:
+                data["review"]["security_concerns"] = "No"
+        return data
 
     def _validate_review_schema(self, data: object) -> bool:
         is_valid = True

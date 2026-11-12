@@ -474,3 +474,94 @@ pub extern "C" fn shino_free_str(ptr: *mut c_char) {
         drop(CString::from_raw(ptr));
     }
 }
+
+// ---------------------------------------------------------------------------
+// Smart Router: per-model circuit breaker (in-memory, thread-safe)
+// ---------------------------------------------------------------------------
+
+use std::collections::HashMap;
+use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+struct BreakerState {
+    opened_at: u64,
+    cooldown_secs: u64,
+}
+
+fn breaker_map() -> &'static Mutex<HashMap<String, BreakerState>> {
+    static BREAKERS: std::sync::OnceLock<Mutex<HashMap<String, BreakerState>>> =
+        std::sync::OnceLock::new();
+    BREAKERS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+fn cooldown_for_kind(kind: &str) -> u64 {
+    match kind {
+        "rate_limit" => 180,
+        "auth" => 600,
+        "timeout" => 90,
+        "empty" => 60,
+        "server" => 120,
+        _ => 30,
+    }
+}
+
+/// Returns 1 if the model may be called now (circuit closed), 0 if it must be skipped.
+#[no_mangle]
+pub extern "C" fn shino_circuit_check(model_ptr: *const c_char, model_len: usize) -> i32 {
+    let model = to_str(model_ptr, model_len);
+    if model.is_empty() {
+        return 1;
+    }
+    let map = match breaker_map().lock() {
+        Ok(m) => m,
+        Err(_) => return 1,
+    };
+    match map.get(&model) {
+        Some(state) => {
+            let now = now_secs();
+            if now.saturating_sub(state.opened_at) >= state.cooldown_secs {
+                1 // cooldown expired: half-open probe allowed
+            } else {
+                0
+            }
+        }
+        None => 1,
+    }
+}
+
+/// Reports a model outcome. kind: "ok" resets the breaker; anything else opens it
+/// with a kind-specific cooldown. Returns 1 if the circuit is now open, else 0.
+#[no_mangle]
+pub extern "C" fn shino_circuit_report(model_ptr: *const c_char, model_len: usize,
+                                        kind_ptr: *const c_char, kind_len: usize) -> i32 {
+    let model = to_str(model_ptr, model_len);
+    let kind = to_str(kind_ptr, kind_len);
+    if model.is_empty() {
+        return 0;
+    }
+    let mut map = match breaker_map().lock() {
+        Ok(m) => m,
+        Err(_) => return 0,
+    };
+    if kind == "ok" {
+        map.remove(&model);
+        return 0;
+    }
+    let cooldown = cooldown_for_kind(&kind);
+    let now = now_secs();
+    // Rate-limit hits extend an existing window instead of restarting it,
+    // so a burst of 429s keeps the model out for the full cooldown.
+    let opened_at = match map.get(&model) {
+        Some(existing) if existing.cooldown_secs == cooldown => existing.opened_at,
+        _ => now,
+    };
+    map.insert(model, BreakerState { opened_at, cooldown_secs: cooldown });
+    1
+}

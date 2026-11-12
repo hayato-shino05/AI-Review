@@ -430,6 +430,65 @@ def risk_priority_sort(diff_files: Sequence) -> List:
             score = _py_score(name, patch)
         return score, str(name)
 
-    ranked = [(_rank(f), f) for f in items]
-    ranked.sort(key=lambda item: item[0], reverse=True)
-    return [f for _, f in ranked]
+
+# ---------------------------------------------------------------------------
+# Smart Router: per-model circuit breaker (Rust-native, Python fallback)
+# ---------------------------------------------------------------------------
+
+_PY_BREAKERS: dict = {}
+
+
+def _coerce_circuit_args(model, kind):
+    if isinstance(model, bytes):
+        model_b = model
+    else:
+        model_b = str(model).encode("utf-8")
+    if kind is None:
+        kind_b = b"ok"
+    elif isinstance(kind, bytes):
+        kind_b = kind
+    else:
+        kind_b = str(kind).encode("utf-8")
+    return model_b, kind_b
+
+
+def circuit_check(model) -> bool:
+    """True if the model may be called now; False while its breaker is open."""
+    lib = _load_lib()
+    model_b, _ = _coerce_circuit_args(model, None)
+    if lib is not None and hasattr(lib, "shino_circuit_check"):
+        lib.shino_circuit_check.argtypes = [ctypes.c_char_p, ctypes.c_size_t]
+        lib.shino_circuit_check.restype = ctypes.c_int
+        return bool(lib.shino_circuit_check(model_b, len(model_b)))
+    import time
+    entry = _PY_BREAKERS.get(str(model))
+    if entry is None:
+        return True
+    return (time.time() - entry[0]) >= entry[1]
+
+
+def circuit_report(model, kind) -> bool:
+    """Report a model outcome; returns True if its circuit is now open."""
+    lib = _load_lib()
+    model_b, kind_b = _coerce_circuit_args(model, kind)
+    if lib is not None and hasattr(lib, "shino_circuit_report"):
+        lib.shino_circuit_report.argtypes = [
+            ctypes.c_char_p, ctypes.c_size_t,
+            ctypes.c_char_p, ctypes.c_size_t,
+        ]
+        lib.shino_circuit_report.restype = ctypes.c_int
+        return bool(lib.shino_circuit_report(model_b, len(model_b), kind_b, len(kind_b)))
+    import time
+    cooldowns = {"rate_limit": 180, "auth": 600, "timeout": 90,
+                 "empty": 60, "server": 120}
+    if kind is None or str(kind) == "ok":
+        _PY_BREAKERS.pop(str(model), None)
+        return False
+    cooldown = cooldowns.get(str(kind), 30)
+    entry = _PY_BREAKERS.get(str(model))
+    if entry is not None and entry[1] == cooldown:
+        opened_at = entry[0]
+    else:
+        opened_at = time.time()
+    _PY_BREAKERS[str(model)] = (opened_at, cooldown)
+    return True

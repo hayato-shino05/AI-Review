@@ -1,0 +1,73 @@
+{
+  "run_at": "2026-11-12T04:23:50.921734+00:00",
+  "total_cases": 4,
+  "total_duration_seconds": 69.332,
+  "recall_rate": 1.0,
+  "caught_p1": 3,
+  "total_p1": 3,
+  "false_positives": 0,
+  "average_judge_score": 4.8625,
+  "violations": [],
+  "results": [
+    {
+      "case_id": "CPP-CONCURRENCY-01",
+      "severity": "P1",
+      "verdict": "PASS",
+      "overall": 4.45,
+      "scores": {
+        "accuracy": 4.0,
+        "actionability": 4.5,
+        "hallucination_penalty": 5.0,
+        "overall": 4.45,
+        "verdict": "PASS",
+        "reason": "Bot đã phát hiện và sửa đúng cả 2 lỗi P1 (data race đọc m_state, TOCTOU trong vote_for) bằng choke point lock_guard, không bịa đặt lỗi ngoài diff. Tuy nhiên output chỉ là diff sửa kèm kết luận chung chung, chưa phân tích rõ bản chất kỹ thuật từng lỗi, nên accuracy chưa đạt tối đa."
+      },
+      "duration_seconds": 26.545
+    },
+    {
+      "case_id": "RUST-STATE-01",
+      "severity": "P1",
+      "verdict": "PASS",
+      "overall": 5.0,
+      "scores": {
+        "accuracy": 5.0,
+        "actionability": 5.0,
+        "hallucination_penalty": 5.0,
+        "overall": 5.0,
+        "verdict": "PASS",
+        "reason": "Bot bắt chính xác lỗi P1 (thiếu kiểm tra committed trong apply_entry), đưa ra bản sửa cụ thể qua diff, không bịa đặt lỗi ngoài diff."
+      },
+      "duration_seconds": 20.873
+    },
+    {
+      "case_id": "PY-TIMEOUT-01",
+      "severity": "P1",
+      "verdict": "PASS",
+      "overall": 5.0,
+      "scores": {
+        "accuracy": 5.0,
+        "actionability": 5.0,
+        "hallucination_penalty": 5.0,
+        "overall": 5.0,
+        "verdict": "PASS",
+        "reason": "Bot review xác định đúng lỗi P1/P2 (unhandled exception urlopen) và đưa ra bản sửa cụ thể: thêm import socket/URLError và khăn try/except bắt đúng hai ngoại lệ. Không bịa lỗi, không bỏ sót, hướng dẫn khả thi ngay."
+      },
+      "duration_seconds": 11.87
+    },
+    {
+      "case_id": "CLEAN-CODE-01",
+      "severity": "none",
+      "verdict": "PASS",
+      "overall": 5.0,
+      "scores": {
+        "accuracy": 5.0,
+        "actionability": 5.0,
+        "hallucination_penalty": 5.0,
+        "overall": 5.0,
+        "verdict": "PASS",
+        "reason": "Ground truth là clean code (0 lỗi) và Bot review chính xác không báo lỗi nào, không có false positive, thỏa mãn Quy tắc 4."
+      },
+      "duration_seconds": 10.045
+    }
+  ]
+}
